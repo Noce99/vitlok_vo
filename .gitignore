@@ -21,3 +21,4 @@ output/
 
 # CSF drops this in the working directory
 cloth_nodes.txt
+.pytest_cache/
