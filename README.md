@@ -263,6 +263,14 @@ different cameras as far as calibration is concerned.
 ignores `--undistort-crf`. Installing ffmpeg is recommended — the fallback's
 quality is not controllable.
 
+**`install.sh` fails on `typing_extensions` with `No matching distribution found
+for flit_core`.** An old pip. Versions before 23.3 treat the wheel's metadata
+name `typing_extensions` as inconsistent with the requested `typing-extensions`,
+reject the wheel, fall back to the source distribution, and then cannot fetch its
+build dependencies because that step restricts the index to PyTorch's.
+`install.sh` upgrades pip first to avoid this; if you are installing by hand, run
+`pip install --upgrade pip` before anything else.
+
 ---
 
 ## Output format

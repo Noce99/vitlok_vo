@@ -23,21 +23,31 @@ if sys.version_info[:2] != (3, 10):
              f"{sys.version.split()[0]}")
 PY
 
-# 1 - torch first: everything else builds against it.
+# 1 - pip first. The pip that Python 3.10's venv bundles (23.0.1) rejects wheels
+#     whose metadata name uses an underscore while the requirement uses a hyphen
+#     ("typing_extensions" vs "typing-extensions"), falls back to the sdist, and
+#     then cannot reach PyPI for its build dependencies because step 2 restricts
+#     the index to PyTorch's. pip 23.3+ normalises the two names and is fine.
+echo "==> upgrading pip"
+pip install --quiet --upgrade "pip>=23.3" setuptools wheel
+
+# 2 - torch next: everything else builds against it. torchvision is pinned to the
+#     release that pairs with torch 2.3.1; leaving it loose makes pip download a
+#     newer torchvision, discover it wants a newer torch, and backtrack.
 echo "==> installing torch"
 pip install --index-url "https://download.pytorch.org/whl/$CUDA_TAG" \
-    torch==2.3.1 torchvision
+    torch==2.3.1 torchvision==0.18.1
 
-# 2 - torch-scatter compiles against the torch just installed, so it must not
+# 3 - torch-scatter compiles against the torch just installed, so it must not
 #     be built in an isolated environment that would fetch a different one.
 echo "==> installing torch-scatter"
 pip install --no-build-isolation torch-scatter
 
-# 3 - everything else.
+# 4 - everything else.
 echo "==> installing requirements"
 pip install -r "$ROOT/requirements.txt"
 
-# 4 - Eigen, a header-only build dependency of DPVO's bundle-adjustment kernels.
+# 5 - Eigen, a header-only build dependency of DPVO's bundle-adjustment kernels.
 if [ ! -d "$DPVO/thirdparty/eigen-$EIGEN_VERSION" ]; then
     echo "==> downloading Eigen $EIGEN_VERSION"
     mkdir -p "$DPVO/thirdparty"
@@ -50,12 +60,12 @@ else
     echo "==> Eigen already present"
 fi
 
-# 5 - If nvcc and your system compiler disagree with the one torch was built
+# 6 - If nvcc and your system compiler disagree with the one torch was built
 #     with, pin them here. gcc-12 is the usual answer on Ubuntu 24.04.
 # export CC=/usr/bin/gcc-12
 # export CXX=/usr/bin/g++-12
 
-# 6 - Build the patched DPVO (three CUDA extensions; this takes a few minutes).
+# 7 - Build the patched DPVO (three CUDA extensions; this takes a few minutes).
 if python -c "import dpvo" 2>/dev/null; then
     echo "==> DPVO already installed"
 else
@@ -63,7 +73,7 @@ else
     pip install --no-build-isolation "$DPVO"
 fi
 
-# 7 - DPVO's pretrained weights.
+# 8 - DPVO's pretrained weights.
 if [ ! -f "$DPVO/dpvo.pth" ]; then
     echo "==> downloading DPVO weights"
     tmp="$(mktemp -d)"
