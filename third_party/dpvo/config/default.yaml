@@ -1,0 +1,20 @@
+### DPVO Config File ###
+
+# VO config (increase for better accuracy)
+PATCHES_PER_FRAME: 96
+REMOVAL_WINDOW: 22
+OPTIMIZATION_WINDOW: 10
+PATCH_LIFETIME: 13
+
+# threshold for keyframe removal
+KEYFRAME_THRESH: 15.0
+
+# camera motion model
+MOTION_MODEL: 'DAMPED_LINEAR'
+MOTION_DAMPING: 0.5
+
+# maybe use mixed precision for inference
+MIXED_PRECISION: True
+
+CENTROID_SEL_STRAT: 'DEPTH_HALF_RANDOM' # 'RANDOM' or 'DEPTH_HALF_RANDOM' or 'DEPTH_CLOSE'
+CENTROID_SEL_RANDOM_RATIO: 0.5 # for DEPTH_HALF_RANDOM: fraction of patches picked fully at random (rest biased towards nearby depth)

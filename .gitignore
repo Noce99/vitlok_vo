@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+
+# virtualenvs
+venv*/
+.venv/
+
+# vendored DPVO build artefacts
+third_party/dpvo/thirdparty/
+third_party/dpvo/*.zip
+third_party/dpvo/dpvo.pth
+
+# pipeline outputs
+output/
+*.h5
+*.gt_trajectory
+
+# CSF drops this in the working directory
+cloth_nodes.txt

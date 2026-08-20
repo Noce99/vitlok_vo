@@ -1,0 +1,15 @@
+# Optional: Apple DepthPro as an alternative to the default Metric3D backbone.
+#
+# DepthPro is distributed under Apple's ML research licence, which is NOT
+# compatible with this project's GPL-3.0 licence for redistribution. It is
+# therefore neither vendored nor a hard dependency -- it is imported lazily and
+# only when you pass --depth-model depthpro.
+#
+#   pip install -r requirements-depthpro.txt
+#   # then fetch the checkpoint (~1.9 GB):
+#   #   https://ml-site.cdn-apple.com/models/depth-pro/depth_pro.pt
+#   # and point --depthpro-checkpoint at it.
+
+depth_pro @ git+https://github.com/apple/ml-depth-pro.git
+pillow_heif
+timm
