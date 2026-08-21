@@ -1,0 +1,46 @@
+# GS010427 — MicroSAFETY bike dataset, GoPro Max 360 footage
+# (4096x2048, 29.97 fps, ~14460 frames -- a genuine 2:1 equirectangular sphere).
+#
+#   python video_to_trajectory.py --config example_360.yaml
+#
+# There is no lens to calibrate for a stitched 360 video, so this uses
+# --360-camera-model instead of --calibration: stage 1 extracts a single
+# rectilinear view out of the sphere and feeds that to the rest of the
+# pipeline exactly like a normal lens would. See README.md, "Or: use a
+# 360-degree video instead".
+# Run from the repo root.
+
+# --- inputs -----------------------------------------------------------------
+video: "/mnt/scratch1/vitlok_data/data-bike/MicroSAFETY data/GS010427.mp4"
+
+# TODO: measure and replace. This is the pipeline's only metric reference --
+# an error here scales the whole trajectory (see CLAUDE.md).
+camera_height: 1.8
+
+# --- outputs ----------------------------------------------------------------
+output: output           # trajectory lands in output/GS010427/
+keep_intermediates: false
+
+# --- stage 1: 360-degree undistortion ---------------------------------------
+three_sixty_camera_model: gopromax
+three_sixty_direction: "0,-110,0"    # pitch,yaw,roll
+three_sixty_fov: 90.0
+three_sixty_out_width: 1920
+three_sixty_out_height: 1080
+undistort_crf: 14
+
+# --- stage 2: depth -----------------------------------------------------
+depth_model: metric3d
+depth_scale: 1.0
+depth_batch_size: 64
+
+# --- stage 3: ground-plane scale & shift ------------------------------------
+sas_stride: 20
+sas_smooth_sigma: 0.0
+bottom_fraction: 0.6
+max_ground_depth: 30.0
+
+# --- stage 4: DPVO ----------------------------------------------------------
+scaling: depth_ratio
+stride: 1
+dpvo_opts: []

@@ -6,7 +6,9 @@
 
 Four stages run back to back, each implemented in ``src/``:
 
-1. :mod:`src.undistortion` -- undistort the video into a linear one.
+1. :mod:`src.undistortion` -- undistort the video into a linear one. Pass
+   ``--360-camera-model`` to switch to :mod:`src.undistortion_360` instead,
+   which extracts a rectilinear view out of an equirectangular 360 video.
 2. :mod:`src.depth` -- predict a metric depth map for every frame.
 3. :mod:`src.ground_scale_shift` -- recover the depth's true scale and shift by
    fitting the ground plane against the known camera height.
@@ -35,6 +37,7 @@ from src.dpvo_runner import run_dpvo
 from src.ground_scale_shift import fit_ground_scale_shift
 from src.trajectory import save_trajectory
 from src.undistortion import undistort_video
+from src.undistortion_360 import undistort_360_video
 from src.workdir import WorkDir
 
 
@@ -46,7 +49,10 @@ def main() -> int:
 
     with WorkDir(cfg) as work:
         with _stage("undistort", timings):
-            video = undistort_video(cfg, work)
+            if cfg.three_sixty_camera_model is not None:
+                video = undistort_360_video(cfg, work)
+            else:
+                video = undistort_video(cfg, work)
         with _stage("depth", timings):
             depth_maps = compute_depth(cfg, video, work)
         with _stage("ground_scale_shift", timings):

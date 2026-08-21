@@ -25,6 +25,8 @@ from typing import Any, Optional
 
 import yaml
 
+from .camera360 import parse_direction, resolve_camera_model
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Fields coerced to absolute :class:`~pathlib.Path` objects on construction.
@@ -52,8 +54,12 @@ class RunConfig:
     video: Path
     """Source video. May be distorted; stage 1 linearises it."""
 
-    calibration: Path
-    """Camera calibration file, ``fx fy cx cy k1 k2 p1 p2 k3`` on one line."""
+    calibration: Optional[Path] = None
+    """Camera calibration file, ``fx fy cx cy k1 k2 p1 p2 k3`` on one line.
+
+    Required unless ``three_sixty_camera_model`` is set, in which case there is
+    no lens to correct for and this is ignored.
+    """
 
     camera_height: float = 1.8
     """Distance in metres from the camera's optical centre to the ground.
@@ -83,6 +89,35 @@ class RunConfig:
 
     undistort_crf: int = 14
     """x264 quality for the linear video. Lower is better; 14 is visually lossless."""
+
+    three_sixty_camera_model: Optional[str] = None
+    """Switches stage 1 to :mod:`src.undistortion_360`: ``--video`` is treated as
+    an equirectangular 360 video and a rectilinear view is extracted from it
+    instead of running ``--calibration`` through ``cv2.undistort``. Selects a
+    known camera from ``src.camera360.KNOWN_360_CAMERAS`` (``"gopromax"`` is the
+    only one registered so far); pass ``"custom"`` with
+    ``three_sixty_camera_params`` to describe one that isn't. ``None`` (the
+    default) keeps the normal lens-based pipeline."""
+
+    three_sixty_direction: str = "0,0,0"
+    """``"pitch,yaw,roll"`` in degrees: the direction the extracted view looks,
+    relative to the source camera's own forward direction and horizon. Only
+    used when ``three_sixty_camera_model`` is set."""
+
+    three_sixty_camera_params: Optional[str] = None
+    """Manual geometry for ``three_sixty_camera_model`` (required for an
+    unregistered camera, optional to override a known one), e.g.
+    ``"fov_h=360,fov_v=180"``. See ``src.camera360.resolve_camera_model`` for
+    the full key list."""
+
+    three_sixty_fov: float = 90.0
+    """Horizontal field of view, in degrees, of the extracted rectilinear
+    view."""
+
+    three_sixty_out_width: int = 1920
+    three_sixty_out_height: int = 1080
+    """Pixel size of the extracted rectilinear view, before cropping down to a
+    multiple of ``src.undistortion.SIZE_MULTIPLE``."""
 
     # --- stage 2: depth ---------------------------------------------------
     depth_model: str = "metric3d"
@@ -142,8 +177,32 @@ class RunConfig:
         """Fail fast, with a message naming the offending flag."""
         if not self.video.is_file():
             raise FileNotFoundError(f"--video: no such file: {self.video}")
-        if not self.calibration.is_file():
-            raise FileNotFoundError(f"--calibration: no such file: {self.calibration}")
+        if self.three_sixty_camera_model is None:
+            if self.calibration is None:
+                raise FileNotFoundError(
+                    "--calibration is required (or pass --360-camera-model for a "
+                    "360 video)"
+                )
+            if not self.calibration.is_file():
+                raise FileNotFoundError(
+                    f"--calibration: no such file: {self.calibration}"
+                )
+        else:
+            if self.calibration is not None and not self.calibration.is_file():
+                raise FileNotFoundError(
+                    f"--calibration: no such file: {self.calibration}"
+                )
+            if not 0 < self.three_sixty_fov < 180:
+                raise ValueError(
+                    f"--360-fov must be in (0, 180), got {self.three_sixty_fov}"
+                )
+            if self.three_sixty_out_width <= 0 or self.three_sixty_out_height <= 0:
+                raise ValueError(
+                    "--360-out-width/--360-out-height must be positive, got "
+                    f"{self.three_sixty_out_width}x{self.three_sixty_out_height}"
+                )
+            parse_direction(self.three_sixty_direction)
+            resolve_camera_model(self.three_sixty_camera_model, self.three_sixty_camera_params)
         if self.depth_model not in DEPTH_MODELS:
             raise ValueError(
                 f"--depth-model must be one of {DEPTH_MODELS}, got {self.depth_model!r}"
@@ -254,12 +313,15 @@ class RunConfig:
             if value is not None:
                 settings[f.name] = value
 
-        missing = [k for k in ("video", "calibration") if k not in settings]
+        missing = [k for k in ("video",) if k not in settings]
+        if "calibration" not in settings and not settings.get("three_sixty_camera_model"):
+            missing.append("calibration")
         if missing:
             raise ValueError(
                 "missing required setting(s): "
                 + ", ".join(f"--{k}" for k in missing)
-                + " (pass them as flags or in --config)"
+                + " (pass them as flags or in --config; --calibration is not "
+                  "required if --360-camera-model is given)"
             )
 
         for key in ("video", "calibration", "output", "work_dir",
@@ -307,6 +369,31 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Scale factor for the linear video (default: 0.5).")
     g.add_argument("--undistort-crf", dest="undistort_crf", type=int, default=None,
                    help="x264 CRF for the linear video (default: 14).")
+
+    g = p.add_argument_group("stage 1: 360-degree undistortion")
+    g.add_argument("--360-camera-model", dest="three_sixty_camera_model",
+                   nargs="?", const="gopromax", default=None,
+                   help="Treat --video as an equirectangular 360 video and extract "
+                        "a rectilinear view instead of undistorting with "
+                        "--calibration. Bare flag selects 'gopromax'; omit "
+                        "entirely for a normal lens (default). Pass 'custom' with "
+                        "--360-camera-params for an unlisted camera.")
+    g.add_argument("--360-direction", dest="three_sixty_direction", default=None,
+                   help="'pitch,yaw,roll' in degrees: where the extracted view "
+                        "looks, relative to the camera's own forward direction and "
+                        "horizon (default: '0,0,0').")
+    g.add_argument("--360-camera-params", dest="three_sixty_camera_params", default=None,
+                   help="Manual geometry for --360-camera-model custom (or to "
+                        "override a known one), e.g. 'fov_h=360,fov_v=180'.")
+    g.add_argument("--360-fov", dest="three_sixty_fov", type=float, default=None,
+                   help="Horizontal field of view of the extracted view, in "
+                        "degrees (default: 90).")
+    g.add_argument("--360-out-width", dest="three_sixty_out_width", type=int,
+                   default=None,
+                   help="Width of the extracted view in pixels (default: 1920).")
+    g.add_argument("--360-out-height", dest="three_sixty_out_height", type=int,
+                   default=None,
+                   help="Height of the extracted view in pixels (default: 1080).")
 
     g = p.add_argument_group("stage 2: depth")
     g.add_argument("--depth-model", dest="depth_model", choices=DEPTH_MODELS,

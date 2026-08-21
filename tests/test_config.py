@@ -79,3 +79,39 @@ def test_validation_rejects(video, field, value):
 def test_depthpro_needs_a_checkpoint(video):
     with pytest.raises(ValueError, match="depthpro-checkpoint"):
         _config(video, depth_model="depthpro")
+
+
+def test_calibration_not_required_in_360_mode(video):
+    cfg = RunConfig(video=video, three_sixty_camera_model="gopromax")
+    assert cfg.calibration is None
+
+
+def test_calibration_still_required_without_360_mode(video):
+    with pytest.raises(FileNotFoundError, match="--calibration"):
+        RunConfig(video=video)
+
+
+def test_360_mode_rejects_unknown_camera_without_params(video):
+    with pytest.raises(ValueError, match="not a known camera"):
+        RunConfig(video=video, three_sixty_camera_model="insta360x3")
+
+
+def test_360_mode_accepts_custom_params(video):
+    cfg = RunConfig(
+        video=video,
+        three_sixty_camera_model="custom",
+        three_sixty_camera_params="fov_h=180,fov_v=90",
+    )
+    assert cfg.calibration is None
+
+
+def test_360_bare_flag_defaults_to_gopromax(video):
+    args = build_parser().parse_args([str(video), "--360-camera-model"])
+    cfg = RunConfig.from_args(args)
+    assert cfg.three_sixty_camera_model == "gopromax"
+
+
+def test_from_cli_missing_calibration_mentions_360_escape_hatch(video):
+    args = build_parser().parse_args([str(video)])
+    with pytest.raises(ValueError, match="--360-camera-model"):
+        RunConfig.from_args(args)

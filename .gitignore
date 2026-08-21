@@ -22,3 +22,8 @@ output/
 # CSF drops this in the working directory
 cloth_nodes.txt
 .pytest_cache/
+
+# Configurations file, but example.yaml
+*.yaml
+!example.yaml
+!example_360.yaml

@@ -100,6 +100,53 @@ Calibrations for the project's GoPro modes ship in `calibration/`: `gopro_L`
 (linear), `gopro_N` (normal), `gopro_W` (wide), `gopro_SW` (super-wide), plus
 `tartan` for distortion-free synthetic footage.
 
+### Or: use a 360-degree video instead
+
+There is no lens to calibrate for a stitched 360 video, so skip step 1 and pass
+`--360-camera-model` instead of `--calibration`. It picks a single rectilinear
+view out of the equirectangular sphere and feeds *that* to the rest of the
+pipeline, unchanged:
+
+```bash
+python video_to_trajectory.py 360_walk.mp4 \
+    --360-camera-model gopromax --360-direction "0,0,0" \
+    --camera-height 1.8
+```
+
+`--360-direction "pitch,yaw,roll"` (degrees) points the extracted view: `0,0,0`
+looks straight out the camera's own front at the horizon; positive pitch tilts
+up, positive yaw pans right, positive roll rotates the image clockwise.
+`--360-fov` sets its horizontal field of view (default `90`), and
+`--360-out-width`/`--360-out-height` its pixel size (default `1920x1080`).
+
+The bare flag `--360-camera-model` (no value) defaults to `gopromax`, the only
+camera registered in `src/camera360.py`. Passing an unregistered name fails
+with the two numbers it needs (`fov_h`, the horizontal field of view of the
+stitched export in degrees, and `fov_v`, the vertical one — `360`/`180` for a
+genuine full sphere) and how to supply them:
+
+```bash
+python video_to_trajectory.py 360_walk.mp4 \
+    --360-camera-model custom --360-camera-params fov_h=360,fov_v=180 \
+    --camera-height 1.8
+```
+
+Check `undistortion_preview.jpg` in the output directory first — it shows the
+source frame next to the extracted view, the fastest way to confirm
+`--360-direction` points where intended. To try out a direction before
+committing to a full run, `check_360.py` extracts a short clip (20 s by
+default) instead of the whole video:
+
+```bash
+python check_360.py --config example_360.yaml --duration 10
+python check_360.py 360_walk.mp4 --360-camera-model gopromax \
+    --360-direction "0,90,0" --duration 10
+```
+
+It takes the same `--config` or `--360-*` flags as `video_to_trajectory.py`
+(anything else, like `--camera-height`, is accepted but unused) and writes to
+`<output>/<video stem>/check_360.mp4`.
+
 ## 2. Video → trajectory
 
 ```bash
@@ -193,11 +240,18 @@ extending `CLUSTERS` in `src/sbatch.py`.
 
 ## The four stages
 
-### 1 · Undistortion (`src/undistortion.py`)
+### 1 · Undistortion (`src/undistortion.py`, or `src/undistortion_360.py`)
 
 Undistorts every frame with `cv2.undistort`, optionally resizes (`--resize`,
 default `0.5`), and writes a linear video into the scratch directory. Everything
 downstream then works with four intrinsics and no distortion model.
+
+With `--360-camera-model`, `src/undistortion_360.py` runs instead: it treats the
+source as an equirectangular projection of a sphere (`src/camera360.py`) and
+resamples a virtual pinhole camera out of it, pointed by `--360-direction`. The
+`cv2.remap` lookup table is built once and reused for every frame. The result is
+the same `LinearVideo` type either way, so stages 2–4 cannot tell which path
+produced it.
 
 ### 2 · Depth (`src/depth.py`)
 
