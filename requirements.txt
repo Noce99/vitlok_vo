@@ -18,6 +18,17 @@ cloth-simulation-filter     # CSF ground segmentation (Apache-2.0)
 h5py
 PyYAML
 
+# --- Metric3D's torch.hub dependencies ---
+# hubconf.py declares only torch and torchvision, so these are on us to provide.
+# mmengine reads its model configs; the "-lite" build is the same pure-Python
+# package minus the opencv-python dependency, which would otherwise install a
+# second cv2 alongside the headless one above. A few stray mmcv imports are
+# shimmed over in src/depth.py (_shim_mmcv) rather than dragged in for real.
+# timm supplies the backbone layers; Metric3D imports them via the deprecated
+# timm.models.layers path, which current timm still forwards with a warning.
+mmengine-lite
+timm
+
 # --- geospatial ---
 pyproj                      # EPSG transforms + azimuthal-equidistant projection
 

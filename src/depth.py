@@ -165,10 +165,57 @@ def _load_model(cfg: RunConfig, video: LinearVideo) -> InferFn:
     raise ValueError(f"unknown depth model: {cfg.depth_model!r}")
 
 
+def _shim_mmcv() -> None:
+    """Satisfy Metric3D's stray ``mmcv`` import with an ``mmengine`` stand-in.
+
+    ``mono/utils/comm.py`` opens with a bare ::
+
+        from mmcv.utils import collect_env as collect_base_env
+
+    which has no ``mmengine`` fallback -- unlike every other ``mmcv`` import on
+    the inference path -- and whose only consumer is commented out a few lines
+    below. Taken at face value it would make us build ``mmcv``'s CUDA extensions
+    against torch 2.3.1 to import a name nothing calls.
+
+    So we register a minimal ``mmcv.utils`` in :data:`sys.modules` first, backed
+    by the real ``mmengine`` implementations. Nothing is stubbed out: these are
+    the functions ``mmcv.utils`` would have re-exported anyway. If a genuine
+    ``mmcv`` is installed, we leave it well alone.
+    """
+    import sys
+    import types
+
+    if "mmcv" in sys.modules:
+        return
+    try:
+        import mmcv  # noqa: F401  -- a real one is already installed
+        return
+    except ImportError:
+        pass
+
+    from mmengine import Config, DictAction
+    from mmengine.utils import get_git_hash
+    from mmengine.utils.dl_utils import collect_env
+
+    mmcv = types.ModuleType("mmcv")
+    utils = types.ModuleType("mmcv.utils")
+    for name, obj in (
+        ("Config", Config),
+        ("DictAction", DictAction),
+        ("collect_env", collect_env),
+        ("get_git_hash", get_git_hash),
+    ):
+        setattr(utils, name, obj)
+    mmcv.utils = utils
+    sys.modules["mmcv"] = mmcv
+    sys.modules["mmcv.utils"] = utils
+
+
 def _load_metric3d() -> InferFn:
     """Metric3D ViT-small via ``torch.hub``; weights are fetched on first use."""
     import torch
 
+    _shim_mmcv()
     print("[depth] loading Metric3D (torch.hub: yvanyin/metric3d)")
     model = torch.hub.load("yvanyin/metric3d", "metric3d_vit_small", pretrain=True)
     model = model.cuda().eval()

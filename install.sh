@@ -74,15 +74,56 @@ else
 fi
 
 # 8 - DPVO's pretrained weights.
-if [ ! -f "$DPVO/dpvo.pth" ]; then
+#
+#     Upstream's download_models_and_data.sh points at a Dropbox link that is now
+#     dead — it serves an HTML error page, which unzip then rejects with
+#     "End-of-central-directory signature not found". We try a Hugging Face
+#     mirror first and keep Dropbox as a fallback in case it comes back. Every
+#     candidate is checksummed against the known-good file before being installed,
+#     so an error page can never be mistaken for weights again.
+#
+#     Already have the file? Point DPVO_WEIGHTS at it to skip the download:
+#       DPVO_WEIGHTS=/path/to/dpvo.pth ./install.sh
+DPVO_PTH_SHA256="30d02dc2b88a321cf99aad8e4ea1152a44d791b5b65bf95ad036922819c0ff12"
+
+check_sha256() {  # check_sha256 FILE -> 0 if it matches the expected digest
+    [ -f "$1" ] && [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$DPVO_PTH_SHA256" ]
+}
+
+if [ -f "$DPVO/dpvo.pth" ]; then
+    echo "==> DPVO weights already present"
+elif [ -n "${DPVO_WEIGHTS:-}" ]; then
+    echo "==> using DPVO weights from \$DPVO_WEIGHTS"
+    check_sha256 "$DPVO_WEIGHTS" \
+        || echo "    warning: $DPVO_WEIGHTS does not match the expected checksum"
+    cp "$DPVO_WEIGHTS" "$DPVO/dpvo.pth"
+else
     echo "==> downloading DPVO weights"
     tmp="$(mktemp -d)"
-    wget -q --show-progress -O "$tmp/models.zip" \
-        "https://www.dropbox.com/s/nap0u8zslspdwm4/models.zip"
-    unzip -q -j "$tmp/models.zip" "dpvo.pth" -d "$DPVO"
+    trap 'rm -rf "$tmp"' EXIT
+
+    for url in \
+        "https://huggingface.co/vslamlab/dpvo_weights/resolve/main/models.zip" \
+        "https://www.dropbox.com/s/nap0u8zslspdwm4/models.zip?dl=1"
+    do
+        echo "    trying $url"
+        rm -f "$tmp/models.zip" "$tmp/dpvo.pth"
+        wget -q --show-progress -O "$tmp/models.zip" "$url" || continue
+        unzip -q -j -o "$tmp/models.zip" "dpvo.pth" -d "$tmp" 2>/dev/null || continue
+        check_sha256 "$tmp/dpvo.pth" || continue
+        mv "$tmp/dpvo.pth" "$DPVO/dpvo.pth"
+        break
+    done
+
+    if [ ! -f "$DPVO/dpvo.pth" ]; then
+        echo "!!  could not fetch DPVO weights (dpvo.pth, sha256 $DPVO_PTH_SHA256)." >&2
+        echo "!!  Download it by hand, then re-run:" >&2
+        echo "!!      DPVO_WEIGHTS=/path/to/dpvo.pth ./install.sh" >&2
+        exit 1
+    fi
+
     rm -rf "$tmp"
-else
-    echo "==> DPVO weights already present"
+    trap - EXIT
 fi
 
 echo
