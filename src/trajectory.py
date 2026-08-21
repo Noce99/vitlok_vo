@@ -1,10 +1,11 @@
 """Reading and writing the pipeline's one deliverable.
 
-A run produces exactly two files::
+A run produces three files::
 
     <output>/<video stem>/
     |-- trajectory.txt    time x y z metric_error, one row per frame
-    `-- metadata.json     how that trajectory was produced
+    |-- metadata.json     how that trajectory was produced
+    `-- trajectory.png    top-down (x, y) plot of the path
 
 ``trajectory.txt`` is whitespace-separated with a one-line header, so
 ``np.loadtxt(path, skiprows=1)`` reads it and so does a spreadsheet. Coordinates
@@ -33,6 +34,7 @@ HEADER = "time x y z metric_error"
 
 TRAJECTORY_NAME = "trajectory.txt"
 METADATA_NAME = "metadata.json"
+PLOT_NAME = "trajectory.png"
 
 
 def save_trajectory(
@@ -75,8 +77,41 @@ def save_trajectory(
         metadata.update(extra)
     (cfg.run_dir / METADATA_NAME).write_text(json.dumps(metadata, indent=2) + "\n")
 
+    plot_path = plot_trajectory(result.txyz, cfg.run_dir / PLOT_NAME)
+
     print(f"[output] {destination}")
     print(f"[output] {cfg.run_dir / METADATA_NAME}")
+    print(f"[output] {plot_path}")
+    return destination
+
+
+def plot_trajectory(txyz: np.ndarray, destination: Path) -> Path:
+    """Plot a top-down (x, y) view of a ``[time, x, y, z]`` trajectory.
+
+    The path is drawn east-north (x, y), matching the ENU world frame the rest
+    of the pipeline uses, with start and end points marked.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figure, axis = plt.subplots(figsize=(8, 8))
+    if len(txyz):
+        axis.plot(txyz[:, 1], txyz[:, 2], color="tab:blue", linewidth=1.2)
+        axis.scatter(txyz[0, 1], txyz[0, 2], color="tab:green", s=60,
+                     zorder=3, label="start")
+        axis.scatter(txyz[-1, 1], txyz[-1, 2], color="tab:red", s=60,
+                     zorder=3, label="end")
+        axis.legend(fontsize=8)
+    axis.set_xlabel("east (m)")
+    axis.set_ylabel("north (m)")
+    axis.set_title(f"Trajectory -- {path_length(txyz):.1f} m")
+    axis.set_aspect("equal", adjustable="datalim")
+    axis.grid(alpha=0.3)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(destination, dpi=150, bbox_inches="tight")
+    plt.close(figure)
     return destination
 
 
