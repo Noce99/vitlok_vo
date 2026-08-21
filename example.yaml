@@ -1,0 +1,44 @@
+# ForestEnv_0001 — TartanAir synthetic sequence (640x640, 10 fps, 539 frames).
+#
+#   python video_to_trajectory.py --config forest_env_0001.yaml
+#   python gpx_evaluation.py output/ForestEnv_0001/trajectory.txt \
+#       --gt-trajectory /mnt/hdd2/vitlok_data/data/ForestEnv/ForestEnv_0001.gt_trajectory \
+#       --gt-axes ned
+#
+# Ground truth is simulator NED, so evaluation needs --gt-axes ned (see CLAUDE.md).
+# Run from the repo root: the relative calibration path resolves against the CWD.
+
+# --- inputs -----------------------------------------------------------------
+video: /mnt/hdd2/vitlok_data/data/ForestEnv/ForestEnv_0001.mp4
+
+# TartanAir's pinhole camera: fx fy cx cy = 320 320 320 320, no distortion.
+# Stage 1 still runs, but undistortion is a no-op for this sequence.
+calibration: calibration/tartan.txt
+
+# From the research repo's data.yaml. This is the pipeline's only metric
+# reference — an error here scales the whole trajectory.
+camera_height: 1.140150617172398
+
+# --- outputs ----------------------------------------------------------------
+output: output          # trajectory lands in output/ForestEnv_0001/
+keep_intermediates: false
+
+# --- stage 1: undistortion --------------------------------------------------
+resize: 1.0             # already 640x640; halving would throw away real detail
+undistort_crf: 14
+
+# --- stage 2: depth ---------------------------------------------------------
+depth_model: metric3d
+depth_scale: 1.0
+depth_batch_size: 64
+
+# --- stage 3: ground-plane scale & shift ------------------------------------
+sas_stride: 20          # ~27 fits over 539 frames, interpolated in between
+sas_smooth_sigma: 0.0
+bottom_fraction: 0.6
+max_ground_depth: 30.0
+
+# --- stage 4: DPVO ----------------------------------------------------------
+scaling: depth_ratio
+stride: 1
+dpvo_opts: []

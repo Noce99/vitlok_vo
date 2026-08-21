@@ -352,4 +352,3 @@ Covers the scale/shift estimator against synthetic ground with known `(s, t)` an
 10 % gross outliers, the alignment (including that it does **not** absorb a scale
 error), the metrics, calibration and trajectory I/O, the config layering, and the
 sbatch generator.
->>>>>>> e591d32 (Initial commit: end-to-end video to metric trajectory)
