@@ -1,16 +1,25 @@
 #!/bin/bash
-# Install video_to_trajectory into the active Python 3.10 environment.
+# Install video_to_trajectory into the active Python environment.
 #
 #   python3.10 -m venv venv && source venv/bin/activate && ./install.sh
+#   python3.13 -m venv venv && source venv/bin/activate && ./install.sh
 #
-# Python 3.10 is required: DPVO's CUDA extensions are built against torch 2.3.1,
-# which has no wheels for newer Pythons.
+# Python 3.10-3.13 is supported. DPVO's CUDA extensions build from source
+# against whatever torch is installed, so the real constraint is just which
+# Python versions PyTorch itself ships wheels for: cp313 wheels only exist
+# from CUDA tag cu126 onwards -- cu118/cu121/cu124 never got a cp313 build,
+# on either linux_x86_64 or linux_aarch64 (e.g. GH200 nodes). torch==2.9.1
+# (below) is available across cu126/cu128/cu130 on both architectures; if
+# you bump it, re-check https://download.pytorch.org/whl/<tag>/torch/ for
+# your tag before assuming a newer pin will resolve. For Python 3.10-3.12
+# any tag works.
 #
-# Set CUDA_TAG for your driver's CUDA version (cu118, cu121, cu124, ...):
-#   CUDA_TAG=cu124 ./install.sh
+# Set CUDA_TAG for your driver's CUDA version (cu118, cu121, cu124, cu126,
+# cu128, cu130, ...):
+#   CUDA_TAG=cu130 ./install.sh
 set -euo pipefail
 
-CUDA_TAG="${CUDA_TAG:-cu121}"
+CUDA_TAG="${CUDA_TAG:-cu126}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DPVO="$ROOT/third_party/dpvo"
 EIGEN_VERSION="3.4.0"
@@ -18,9 +27,9 @@ EIGEN_VERSION="3.4.0"
 echo "==> Python $(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))'), CUDA tag $CUDA_TAG"
 python - <<'PY'
 import sys
-if sys.version_info[:2] != (3, 10):
-    sys.exit(f"Python 3.10 is required (DPVO pins torch 2.3.1); this is "
-             f"{sys.version.split()[0]}")
+major, minor = sys.version_info[:2]
+if not (3, 10) <= (major, minor) <= (3, 13):
+    sys.exit(f"Python 3.10-3.13 is supported; this is {sys.version.split()[0]}")
 PY
 
 # 1 - pip first. The pip that Python 3.10's venv bundles (23.0.1) rejects wheels
@@ -32,11 +41,11 @@ echo "==> upgrading pip"
 pip install --quiet --upgrade "pip>=23.3" setuptools wheel
 
 # 2 - torch next: everything else builds against it. torchvision is pinned to the
-#     release that pairs with torch 2.3.1; leaving it loose makes pip download a
+#     release that pairs with torch 2.9.1; leaving it loose makes pip download a
 #     newer torchvision, discover it wants a newer torch, and backtrack.
 echo "==> installing torch"
 pip install --index-url "https://download.pytorch.org/whl/$CUDA_TAG" \
-    torch==2.3.1 torchvision==0.18.1
+    torch==2.9.1 torchvision==0.24.1
 
 # 3 - torch-scatter compiles against the torch just installed, so it must not
 #     be built in an isolated environment that would fetch a different one.

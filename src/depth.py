@@ -211,11 +211,29 @@ def _shim_mmcv() -> None:
     sys.modules["mmcv.utils"] = utils
 
 
+def _silence_dinov2_xformers_warning() -> None:
+    """Quiet Metric3D's "xFormers not available" spam.
+
+    ``mono/model/backbones/ViT_DINO_reg.py`` (Metric3D's cached torch.hub repo,
+    not our code) logs a warning under its ``"dinov2"`` logger, twice per model
+    construction, whenever ``xformers`` isn't importable. xFormers is an optional
+    fused-attention kernel; falling back to plain attention is harmless and just
+    a little slower, and pulling xformers in as a dependency isn't worth it here
+    since it has to match torch/CUDA/arch exactly and is a fragile build on
+    non-x86_64 (e.g. GH200/aarch64). So: silence the logger rather than chase
+    the dependency.
+    """
+    import logging
+
+    logging.getLogger("dinov2").setLevel(logging.ERROR)
+
+
 def _load_metric3d() -> InferFn:
     """Metric3D ViT-small via ``torch.hub``; weights are fetched on first use."""
     import torch
 
     _shim_mmcv()
+    _silence_dinov2_xformers_warning()
     print("[depth] loading Metric3D (torch.hub: yvanyin/metric3d)")
     model = torch.hub.load("yvanyin/metric3d", "metric3d_vit_small", pretrain=True)
     model = model.cuda().eval()

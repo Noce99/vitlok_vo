@@ -21,6 +21,28 @@ depth map for every frame, so both of those choices can be informed by it.
 Passing `depth=None` reproduces stock behaviour, and `CENTROID_SEL_STRAT: 'RANDOM'`
 (as set in `config/fast.yaml`) restores stock centroid selection.
 
+### Build compatibility with torch >= 2.9
+
+Unrelated to the depth-guidance patch above: three more files needed a mechanical
+fix to build against modern torch. `Tensor::type()` -- returning the long-deprecated
+`at::DeprecatedTypeProperties` -- lost its implicit conversion to `c10::ScalarType`,
+which broke every `AT_DISPATCH_FLOATING_TYPES_AND_HALF(x.type(), ...)` /
+`DISPATCH_GROUP_AND_FLOATING_TYPES(group, x.type(), ...)` call with a compile error
+("no suitable conversion function ... exists"). Fixed by switching every such call
+site to `x.scalar_type()` (the non-deprecated equivalent) and simplifying
+`DISPATCH_GROUP_AND_FLOATING_TYPES` in `dispatch.h` to consume a `ScalarType`
+directly instead of round-tripping through `::detail::scalar_type()`.
+
+| File | Change |
+|---|---|
+| `dpvo/lietorch/include/dispatch.h` | `DISPATCH_GROUP_AND_FLOATING_TYPES` takes `TYPE` as an `at::ScalarType` directly. |
+| `dpvo/lietorch/src/lietorch_gpu.cu` | Every `a.type()` / `X.type()` dispatch argument → `.scalar_type()`. |
+| `dpvo/lietorch/src/lietorch_cpu.cpp` | Same. |
+| `dpvo/altcorr/correlation_kernel.cu` | `AT_DISPATCH_FLOATING_TYPES_AND_HALF(fmap1.type()/net.type(), ...)` → `.scalar_type()`. |
+
+`a.device().type()` calls (a different `.type()`, on `torch::Device`) are untouched
+-- that API was never deprecated.
+
 ## What was removed
 
 Parts of upstream DPVO that this pipeline never reaches were dropped to keep the
@@ -37,6 +59,6 @@ module level, so it is not optional even with loop closure disabled.
 
 ## Rebasing onto a newer upstream
 
-The patch is confined to the five files in the table above and is small enough to
+The patch is confined to the files in the two tables above and is small enough to
 re-apply by hand. `git diff` against a fresh upstream checkout of the same commit
 will show it in full.

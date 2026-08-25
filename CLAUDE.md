@@ -12,9 +12,10 @@ reference for behavioural parity.
 ## Commands
 
 ```bash
-# install (Python 3.10 only — DPVO's CUDA extensions pin torch 2.3.1)
+# install (Python 3.10–3.13)
 python3.10 -m venv venv && source venv/bin/activate
-CUDA_TAG=cu121 ./install.sh          # cu118 / cu124 / ... to match the driver
+CUDA_TAG=cu126 ./install.sh          # cu118 / cu121 / cu124 / ... to match the driver
+                                      # (Python 3.13 needs cu126+: see install.sh)
 
 # tests — MUST run from the repo root (see "Gotchas")
 python -m pytest tests/ -q
@@ -109,8 +110,10 @@ being measured; fitting it away would hide exactly the error of interest.
 `tests/test_alignment.py::test_scale_error_survives_alignment` guards this.
 
 **DPVO is patched and vendored.** Upstream DPVO will not work — see
-`third_party/dpvo/PATCHES.md` for the five modified files. `dpvo.pth` is gitignored
-and fetched by `install.sh`.
+`third_party/dpvo/PATCHES.md` for the modified files: five for the depth-guidance
+behaviour, plus four more (`dispatch.h`, `lietorch_gpu.cu`, `lietorch_cpu.cpp`,
+`correlation_kernel.cu`) for a `Tensor::type()` → `.scalar_type()` build fix needed
+by torch >= 2.9. `dpvo.pth` is gitignored and fetched by `install.sh`.
 
 **DepthPro must stay at arm's length.** Its Apple licence is not GPL-3.0 compatible
 for redistribution, so it is never vendored, never a hard dependency, and imported

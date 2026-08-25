@@ -27,3 +27,5 @@ cloth_nodes.txt
 *.yaml
 !example.yaml
 !example_360.yaml
+
+sbatches

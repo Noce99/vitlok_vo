@@ -361,7 +361,6 @@ This project is licensed under the **GNU General Public License v3.0**
 | [DPVO](https://github.com/princeton-vl/DPVO) | MIT | vendored in `third_party/dpvo`, patched — see its `PATCHES.md` |
 | [Metric3D](https://github.com/YvanYin/Metric3D) | BSD-2-Clause | fetched at runtime via `torch.hub` |
 | [CSF](http://ramm.bnu.edu.cn/projects/CSF/) | Apache-2.0 | pip dependency |
-| [Open3D](https://www.open3d.org/) | MIT | pip dependency |
 | [DepthPro](https://github.com/apple/ml-depth-pro) | Apple ML research licence | **optional**, not vendored |
 
 DepthPro is deliberately kept at arm's length: its licence is not GPL-3.0

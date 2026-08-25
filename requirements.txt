@@ -2,16 +2,15 @@
 #
 # torch / torchvision / torch-scatter are NOT listed here: they must be installed
 # against your CUDA version first. install.sh does that before pip-installing this
-# file. DPVO pins torch 2.3.1, which is why Python 3.10 is required.
+# file.
 
 # --- numerics ---
 numpy
-scipy
+scipy                       # also does the KNN point normals for the ground fit (src/normals.py)
 numba
 
 # --- video, images, geometry ---
 opencv-python-headless
-open3d                      # KNN point normals for the ground fit
 cloth-simulation-filter     # CSF ground segmentation (Apache-2.0)
 
 # --- storage / config ---

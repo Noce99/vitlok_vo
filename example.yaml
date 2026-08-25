@@ -9,7 +9,7 @@
 # Run from the repo root: the relative calibration path resolves against the CWD.
 
 # --- inputs -----------------------------------------------------------------
-video: /mnt/hdd2/vitlok_data/data/ForestEnv/ForestEnv_0001.mp4
+video: /nobackup/proj/disk/naiss2025-22-413/shared/vitlok_data/data/ForestEnv/ForestEnv_0001.mp4
 
 # TartanAir's pinhole camera: fx fy cx cy = 320 320 320 320, no distortion.
 # Stage 1 still runs, but undistortion is a no-op for this sequence.

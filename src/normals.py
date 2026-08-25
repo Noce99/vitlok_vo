@@ -17,6 +17,7 @@ makes the system ill-conditioned. Zeroing it costs little and stabilises the fit
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 #: Camera-frame "up" direction. The pipeline flips unprojected points to Y-up
 #: before they get here, so the ground normal should point along +Y.
@@ -30,10 +31,12 @@ def ground_normal(
 ) -> tuple[np.ndarray, float, float, np.ndarray]:
     """Estimate the ground-plane normal by averaging per-point surface normals.
 
-    Open3D estimates a normal at each point by local PCA over its *knn* nearest
-    neighbours. Those normals have an arbitrary sign, so each is flipped into the
-    same hemisphere as *up* before averaging; the mean of unit vectors is the
-    mean direction, which is then renormalised.
+    A normal is estimated at each point by local PCA over its *knn* nearest
+    neighbours (including itself): the eigenvector of the neighbourhood's
+    covariance matrix with the smallest eigenvalue is the direction of least
+    spread, i.e. the surface normal. Those normals have an arbitrary sign, so
+    each is flipped into the same hemisphere as *up* before averaging; the mean
+    of unit vectors is the mean direction, which is then renormalised.
 
     Args:
         points: ``(N, 3)`` ground points in camera coordinates, Y-up.
@@ -46,20 +49,19 @@ def ground_normal(
         in the XY plane (roll) and *angle_x* the tilt in the YZ plane (pitch),
         both in radians, and *roll_only_normal* is *normal* with its pitch
         component removed -- the one the scale/shift solve should use.
-
-    Raises:
-        ImportError: if Open3D is not installed.
     """
-    import open3d as o3d
-
     pts = np.asarray(points, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 3:
         raise ValueError(f"points must be (N, 3), got {pts.shape}")
 
-    cloud = o3d.geometry.PointCloud()
-    cloud.points = o3d.utility.Vector3dVector(pts)
-    cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=knn))
-    normals = np.asarray(cloud.normals)
+    k = min(knn, len(pts))
+    _, neighbour_idx = cKDTree(pts).query(pts, k=k)
+    neighbour_idx = neighbour_idx.reshape(len(pts), k)
+    neighbourhoods = pts[neighbour_idx]                        # (N, k, 3)
+    centered = neighbourhoods - neighbourhoods.mean(axis=1, keepdims=True)
+    covariances = np.einsum("nki,nkj->nij", centered, centered) / k
+    eigvals, eigvecs = np.linalg.eigh(covariances)             # ascending order
+    normals = eigvecs[:, :, 0]                                 # smallest eigenvalue
 
     up_vector = np.asarray(up, dtype=np.float64)
     up_vector = up_vector / np.linalg.norm(up_vector)
