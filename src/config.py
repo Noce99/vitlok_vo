@@ -41,6 +41,15 @@ DEPTH_MODELS = ("metric3d", "depthpro")
 #: How the DPVO trajectory is brought to metric scale (``--scaling``).
 SCALING_MODES = ("depth_ratio", "none")
 
+#: --config keys that belong to gpx_evaluation.py's own loader, not RunConfig's.
+#: A YAML file is commonly shared between the two scripts (e.g. example_360.yaml
+#: sets ``gps_csv`` for gpx_evaluation.py's ``--config``); ignored here rather
+#: than rejected as unknown.
+EVALUATION_ONLY_KEYS = frozenset({
+    "gpx", "gps_csv", "gt_trajectory", "start_time", "gps_epsg", "gt_axes",
+    "map", "world", "epsg", "map_alpha", "out", "label", "rte_delta",
+})
+
 
 @dataclass
 class RunConfig:
@@ -300,13 +309,13 @@ class RunConfig:
             if not isinstance(loaded, dict):
                 raise ValueError(f"--config must contain a YAML mapping: {config_path}")
             known = {f.name for f in fields(cls)}
-            unknown = set(loaded) - known
+            unknown = set(loaded) - known - EVALUATION_ONLY_KEYS
             if unknown:
                 raise ValueError(
                     f"--config has unknown key(s): {sorted(unknown)}. "
                     f"Known keys: {sorted(known)}"
                 )
-            settings.update(loaded)
+            settings.update({k: v for k, v in loaded.items() if k in known})
 
         for f in fields(cls):
             value = getattr(args, f.name, None)

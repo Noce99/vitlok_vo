@@ -5,6 +5,8 @@
         --gpx walk.gpx --start-time 2026-08-20T09:15:00Z \
         --map site.png --world site.pgw --epsg 3006
 
+    python gpx_evaluation.py output/GS010427/trajectory.txt --config example_360.yaml
+
 Reads a ``trajectory.txt`` written by ``video_to_trajectory.py``, aligns it to
 the ground truth with a rotation and a translation -- and deliberately no scale
 fit, since scale is the thing being measured -- then reports:
@@ -17,8 +19,15 @@ fit, since scale is the thing being measured -- then reports:
   (see :mod:`src.diagnostic_plots`);
 * ``estimate.gpx``: the estimate as a GPX track, when an anchor fix is available.
 
-Ground truth comes from ``--gpx`` (cropped to the video's window with
-``--start-time``) or from a pre-computed ``--gt-trajectory`` in local metres.
+Ground truth comes from ``--gpx``, a GPS telemetry ``--csv`` (e.g. a GoPro GPS5
+export -- both cropped to the video's window with ``--start-time``), or a
+pre-computed ``--gt-trajectory`` in local metres.
+
+Any flag can instead be supplied via ``--config``, a YAML file such as
+``example_360.yaml``: it may set ``gpx`` or ``gps_csv`` for the ground-truth
+path, plus any other flag below by its long-flag name. A flag given on the
+command line always overrides the same key in the config file. Unrelated keys
+(from a config file shared with ``video_to_trajectory.py``) are ignored.
 
 Copyright (C) 2026 the video_to_trajectory authors.
 Licensed under the GNU General Public License v3.0 -- see LICENSE.
@@ -34,10 +43,11 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import yaml
 
 from src.alignment import align
 from src.diagnostic_plots import plot_diagnostics
-from src.gpx import load_ground_truth, read_gpx, video_duration_s
+from src.gpx import load_ground_truth, read_csv, read_gpx, video_duration_s
 from src.gpx_export import trajectory_to_gpx
 from src.map_overlay import plot_on_map, plot_without_map
 from src.metrics import KITTI_LENGTHS, RTE_DELTA, compute_all, format_tables
@@ -60,6 +70,7 @@ def main() -> int:
 
     ground_truth = load_ground_truth(
         gpx_path=args.gpx,
+        csv_path=args.csv,
         gt_trajectory_path=args.gt_trajectory,
         start_time=start_time,
         duration_s=duration,
@@ -85,7 +96,7 @@ def main() -> int:
     (out_dir / "metrics.json").write_text(json.dumps({
         "trajectory": str(args.trajectory),
         "label": label,
-        "ground_truth": str(args.gpx or args.gt_trajectory),
+        "ground_truth": str(args.gpx or args.csv or args.gt_trajectory),
         "rte_delta_points": args.rte_delta,
         "kitti_lengths_m": list(KITTI_LENGTHS),
         "gt_points": int(len(ground_truth)),
@@ -109,7 +120,7 @@ def main() -> int:
 
     print(f"[eval] {plot_diagnostics(ground_truth, aligned, out_dir / 'diagnostics.png', label=label, metric_error=metric_error)}")
 
-    anchor = _gpx_anchor(args.gpx)
+    anchor = _track_anchor(args.gpx, args.csv)
     if anchor is not None:
         gpx_path = trajectory_to_gpx(
             trajectory[:, :4], out_dir / "estimate.gpx",
@@ -118,8 +129,8 @@ def main() -> int:
         )
         print(f"[eval] {gpx_path}")
     else:
-        print("[eval] estimate.gpx skipped: --gpx is needed to anchor the "
-              "trajectory to a real-world position", file=sys.stderr)
+        print("[eval] estimate.gpx skipped: --gpx or --csv is needed to anchor "
+              "the trajectory to a real-world position", file=sys.stderr)
     return 0
 
 
@@ -132,37 +143,49 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("trajectory", type=Path,
                         help="trajectory.txt from video_to_trajectory.py.")
+    parser.add_argument("--config", type=Path, default=None,
+                        help="YAML file supplying any flag below by its long-flag "
+                             "name (e.g. 'gpx' or 'gps_csv' for ground truth). "
+                             "A flag given on the command line wins over the same "
+                             "key in the file; keys this script does not "
+                             "recognise -- e.g. from a config shared with "
+                             "video_to_trajectory.py -- are ignored.")
 
     truth = parser.add_argument_group("ground truth")
     truth.add_argument("--gpx", type=Path, default=None,
                        help="GPX track recorded alongside the video.")
+    truth.add_argument("--csv", type=Path, default=None,
+                       help="GPS telemetry CSV (e.g. a GoPro GPS5 export), as an "
+                            "alternative to --gpx.")
     truth.add_argument("--gt-trajectory", dest="gt_trajectory", type=Path,
                        default=None,
                        help="Pre-computed 'time x y z' ground truth in local metres.")
     truth.add_argument("--start-time", dest="start_time", default=None,
                        help="UTC time of the video's first frame, as an ISO 8601 "
-                            "string or a Unix timestamp. Used to crop the GPX.")
+                            "string or a Unix timestamp. Used to crop the GPX/CSV.")
     truth.add_argument("--video", type=Path, default=None,
                        help="Source video, used only to measure its duration.")
-    truth.add_argument("--gps-epsg", dest="gps_epsg", default="4326",
-                       help="CRS of the GPX coordinates.")
+    truth.add_argument("--gps-epsg", dest="gps_epsg", default=None,
+                       help="CRS of the GPX/CSV coordinates (default: 4326).")
     truth.add_argument("--gt-axes", dest="gt_axes", choices=("enu", "ned"),
-                       default="enu",
+                       default=None,
                        help="Axis order of --gt-trajectory: 'enu' (x east, "
                             "y north) or 'ned' (x north, y east), which is what "
-                            "TartanAir and most simulators export. Getting this "
-                            "wrong inflates every metric, because alignment "
-                            "never reflects.")
+                            "TartanAir and most simulators export (default: "
+                            "enu). Getting this wrong inflates every metric, "
+                            "because alignment never reflects.")
 
     mapping = parser.add_argument_group("map")
     mapping.add_argument("--map", type=Path, default=None,
-                         help="Georeferenced map image to draw on.")
+                         help="Georeferenced map image to draw on. Without one, "
+                              "both tracks are plotted on a blank background.")
     mapping.add_argument("--world", type=Path, default=None,
                          help="Its world file (.pgw); found automatically if omitted.")
     mapping.add_argument("--epsg", default=None,
                          help="CRS of the map. Required with --map.")
-    mapping.add_argument("--map-alpha", dest="map_alpha", type=float, default=0.35,
-                         help="How much of the map shows through, in [0, 1].")
+    mapping.add_argument("--map-alpha", dest="map_alpha", type=float, default=None,
+                         help="How much of the map shows through, in [0, 1] "
+                              "(default: 0.35).")
     mapping.add_argument("--no-crop", dest="no_crop", action="store_true",
                          help="Render the whole map instead of cropping to the track.")
 
@@ -171,17 +194,72 @@ def parse_args() -> argparse.Namespace:
                         help="Output directory (default: <trajectory>/../evaluation).")
     output.add_argument("--label", default=None,
                         help="Name for the estimate in tables and plots.")
-    output.add_argument("--rte-delta", dest="rte_delta", type=int, default=RTE_DELTA,
-                        help="Points spanned by each RTE sub-segment.")
+    output.add_argument("--rte-delta", dest="rte_delta", type=int, default=None,
+                        help=f"Points spanned by each RTE sub-segment "
+                             f"(default: {RTE_DELTA}).")
 
     args = parser.parse_args()
+    if args.config is not None:
+        _apply_config(args, args.config)
+
+    args.gps_epsg = args.gps_epsg if args.gps_epsg is not None else "4326"
+    args.gt_axes = args.gt_axes if args.gt_axes is not None else "enu"
+    args.map_alpha = args.map_alpha if args.map_alpha is not None else 0.35
+    args.rte_delta = args.rte_delta if args.rte_delta is not None else RTE_DELTA
+
     if not args.trajectory.is_file():
         parser.error(f"no such file: {args.trajectory}")
-    if args.gpx is None and args.gt_trajectory is None:
-        parser.error("give either --gpx or --gt-trajectory")
+    given = [name for name, value in
+             (("--gpx", args.gpx), ("--csv", args.csv),
+              ("--gt-trajectory", args.gt_trajectory)) if value is not None]
+    if not given:
+        parser.error("give --gpx, --csv or --gt-trajectory (as a flag, or as "
+                      "'gpx'/'gps_csv'/'gt_trajectory' in --config)")
+    if len(given) > 1:
+        parser.error(f"{' and '.join(given)} are alternative ground-truth "
+                      "sources; give only one")
     if args.map is not None and args.epsg is None:
         parser.error("--map needs --epsg, the CRS the map is georeferenced in")
     return args
+
+
+#: --config keys accepted by this script, mapped to their argparse dest. A
+#: config file may carry a superset of these (e.g. example_360.yaml, shared
+#: with video_to_trajectory.py --config); unrecognised keys are ignored rather
+#: than rejected.
+_CONFIG_KEYS = {
+    "gpx": "gpx",
+    "gps_csv": "csv",
+    "gt_trajectory": "gt_trajectory",
+    "start_time": "start_time",
+    "video": "video",
+    "gps_epsg": "gps_epsg",
+    "gt_axes": "gt_axes",
+    "map": "map",
+    "world": "world",
+    "epsg": "epsg",
+    "map_alpha": "map_alpha",
+    "out": "out",
+    "label": "label",
+    "rte_delta": "rte_delta",
+}
+
+#: Which of those dests get coerced to Path, matching their argparse type=.
+_CONFIG_PATH_DESTS = {"gpx", "csv", "gt_trajectory", "video", "map", "world", "out"}
+
+
+def _apply_config(args: argparse.Namespace, config_path: Path) -> None:
+    """Fill in flags left unset on the command line from a --config YAML file."""
+    if not config_path.is_file():
+        raise SystemExit(f"--config: no such file: {config_path}")
+    loaded = yaml.safe_load(config_path.read_text()) or {}
+    if not isinstance(loaded, dict):
+        raise SystemExit(f"--config must contain a YAML mapping: {config_path}")
+    for yaml_key, dest in _CONFIG_KEYS.items():
+        if yaml_key not in loaded or getattr(args, dest) is not None:
+            continue
+        value = loaded[yaml_key]
+        setattr(args, dest, Path(value) if dest in _CONFIG_PATH_DESTS else value)
 
 
 def _resolve_start_time(args) -> Optional[float]:
@@ -227,11 +305,16 @@ def _label_from(metadata: dict, path: Path) -> str:
     return path.parent.name or path.stem
 
 
-def _gpx_anchor(gpx_path: Optional[Path]) -> Optional[tuple[float, float]]:
-    """First fix of the GPX track, used as the export's origin."""
-    if gpx_path is None:
+def _track_anchor(
+    gpx_path: Optional[Path], csv_path: Optional[Path]
+) -> Optional[tuple[float, float]]:
+    """First fix of the GPX/CSV track, used as the GPX export's origin."""
+    if gpx_path is not None:
+        lats, lons, _ = read_gpx(gpx_path)
+    elif csv_path is not None:
+        lats, lons, _ = read_csv(csv_path)
+    else:
         return None
-    lats, lons, _ = read_gpx(gpx_path)
     return float(lats[0]), float(lons[0])
 
 

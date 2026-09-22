@@ -12,6 +12,7 @@
 
 # --- inputs -----------------------------------------------------------------
 video: "/nobackup/proj/disk/naiss2025-22-413/shared/data-bike/GS010427.mp4"
+gps_csv: "/nobackup/proj/disk/naiss2025-22-413/shared/data-bike/Telemetry/GS010427_GoPro Max-GPS5.csv"
 
 # TODO: measure and replace. This is the pipeline's only metric reference --
 # an error here scales the whole trajectory (see CLAUDE.md).

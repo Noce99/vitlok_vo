@@ -147,6 +147,16 @@ It takes the same `--config` or `--360-*` flags as `video_to_trajectory.py`
 (anything else, like `--camera-height`, is accepted but unused) and writes to
 `<output>/<video stem>/check_360.mp4`.
 
+To linearize the *whole* video without running depth, ground-plane fitting or
+DPVO — for either a normal lens or `--360-camera-model` — use `360_to_video.py`.
+It runs exactly stage 1 of `video_to_trajectory.py` and writes to
+`<output>/<video stem>/linear.mp4`:
+
+```bash
+python 360_to_video.py 360_walk.mp4 --360-camera-model gopromax --360-direction "0,0,0"
+python 360_to_video.py --config example_360.yaml
+```
+
 ## 2. Video → trajectory
 
 ```bash
@@ -202,6 +212,16 @@ Without `--map` the overprint is drawn on plain axes in metres instead.
 `--start-time` is when the video's **first frame** was recorded, in UTC, and is
 what lines the GPX up with the video. Getting it wrong shifts the ground truth
 along the track and inflates every metric.
+
+`--csv` reads ground truth from a GPS telemetry CSV (e.g. a GoPro GPS5 export)
+instead of a GPX file — same cropping and projection, just a different source
+format. And any flag, including `--gpx`/`--csv`, can be pulled from a
+`--config` YAML (the same file `video_to_trajectory.py --config` takes, via its
+`gpx`/`gps_csv` key) rather than typed out:
+
+```bash
+python gpx_evaluation.py output/walk/trajectory.txt --config run.yaml
+```
 
 For simulator ground truth in a file rather than a GPX:
 
