@@ -23,6 +23,9 @@ output/
 cloth_nodes.txt
 .pytest_cache/
 
+# clips imported by import_zip.py
+videos/
+
 # Configurations file, but example.yaml
 *.yaml
 !example.yaml
