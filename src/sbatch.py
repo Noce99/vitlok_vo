@@ -41,6 +41,34 @@ CLUSTERS: dict[str, dict] = {
 
 DEFAULT_CLUSTER = "arrhenius"
 
+#: Shared between the log filename and the default output directory, so both
+#: name a job by the same moment even though SLURM has no date pattern of its own.
+STAMP_FORMAT = "%Y-%m-%d_%H-%M-%S"
+
+
+def now_stamp() -> str:
+    """The timestamp tagging a generated job's log file and default output dir."""
+    return datetime.now().strftime(STAMP_FORMAT)
+
+
+def default_output_dir(video: Optional[Path], videos_root: Path,
+                        stamp: str) -> Optional[Path]:
+    """Where a job's trajectory should land when *video* lives under *videos_root*.
+
+    Keeps results next to the source clip -- ``videos/<name>/results/<stamp>/``
+    -- instead of the shared ``./output`` directory that direct CLI runs default
+    to, so a video's outputs stay grouped with its inputs. Returns ``None`` (and
+    lets the pipeline fall back to ``./output``) for videos outside *videos_root*.
+    """
+    if video is None:
+        return None
+    video = Path(video).resolve()
+    try:
+        video.relative_to(Path(videos_root).resolve())
+    except ValueError:
+        return None
+    return video.parent / "results" / stamp
+
 
 @dataclass
 class JobSpec:
@@ -67,8 +95,12 @@ class JobSpec:
         return template.format(kind="gpu") if template else None
 
 
-def render(spec: JobSpec, log_dir: Path) -> str:
-    """Render *spec* into the text of an sbatch script."""
+def render(spec: JobSpec, log_dir: Path, stamp: Optional[str] = None) -> str:
+    """Render *spec* into the text of an sbatch script.
+
+    *stamp* defaults to now; pass one explicitly to share it with a
+    :func:`default_output_dir` computed before the spec's command was built.
+    """
     if spec.cluster not in CLUSTERS:
         raise ValueError(
             f"unknown cluster {spec.cluster!r}; known: {sorted(CLUSTERS)}"
@@ -77,7 +109,8 @@ def render(spec: JobSpec, log_dir: Path) -> str:
 
     # SLURM has no date pattern for log names, so the generation time is baked in
     # and %j (the job id) keeps repeated submissions distinct.
-    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if stamp is None:
+        stamp = now_stamp()
     log_file = log_dir / f"{spec.name}_{stamp}.%j.log"
 
     lines = [
@@ -123,7 +156,7 @@ def render(spec: JobSpec, log_dir: Path) -> str:
     return "\n".join(lines)
 
 
-def write(spec: JobSpec, destination: Path) -> Path:
+def write(spec: JobSpec, destination: Path, stamp: Optional[str] = None) -> Path:
     """Write the rendered job to *destination*, creating its log folder alongside.
 
     Returns:
@@ -133,7 +166,7 @@ def write(spec: JobSpec, destination: Path) -> Path:
     log_dir = destination.parent / destination.stem
     log_dir.mkdir(parents=True, exist_ok=True)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(render(spec, log_dir))
+    destination.write_text(render(spec, log_dir, stamp=stamp))
     destination.chmod(0o755)
     return destination
 
@@ -162,5 +195,8 @@ def build_command(
     if output is not None:
         parts.append(f'--out "{output}"')
     parts.append('--work-dir "$WORK_DIR"')
+    # DPVO's default patch buffer (4096) is sized for short clips; cluster jobs
+    # run long enough videos that it overflows ("buffer size is too small").
+    parts.append("--dpvo-opts BUFFER_SIZE 16384")
     parts.extend(extra)
     return " \\\n    ".join(parts)

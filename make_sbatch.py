@@ -33,9 +33,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from src.sbatch import CLUSTERS, DEFAULT_CLUSTER, JobSpec, build_command, write
+from src.sbatch import (CLUSTERS, DEFAULT_CLUSTER, JobSpec, build_command,
+                         default_output_dir, now_stamp, write)
 
 REPO_ROOT = Path(__file__).resolve().parent
+VIDEOS_DIR = REPO_ROOT / "videos"
 
 
 def main() -> int:
@@ -67,6 +69,9 @@ def main() -> int:
     name = args.name or (video.stem if video else config.stem)
     venv = args.venv or _guess_venv()
 
+    stamp = now_stamp()
+    output = args.out or default_output_dir(video, VIDEOS_DIR, stamp)
+
     spec = JobSpec(
         name=name,
         email=email,
@@ -83,14 +88,14 @@ def main() -> int:
             config=config,
             calibration=calibration,
             camera_height=camera_height,
-            output=args.out,
+            output=output,
             depth_model=args.depth_model,
             extra=args.extra or (),
         ),
     )
 
     destination = args.sbatch_dir / f"{name}.sbatch"
-    written = write(spec, destination)
+    written = write(spec, destination, stamp=stamp)
     print(f"\nwritten {written}")
     print(f"logs will go to {written.parent / written.stem}/")
 
@@ -127,7 +132,9 @@ def parse_args() -> argparse.Namespace:
     job.add_argument("--depth-model", dest="depth_model", default=None,
                      choices=("metric3d", "depthpro"))
     job.add_argument("--out", type=Path, default=None,
-                     help="Output directory for the job's trajectory.")
+                     help="Output directory for the job's trajectory (default: "
+                          "videos/<name>/results/<timestamp>/ for a video under "
+                          "videos/, otherwise ./output/).")
     job.add_argument("--extra", nargs="+", default=None,
                      help="Extra flags appended verbatim to the command.")
 

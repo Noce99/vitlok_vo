@@ -18,8 +18,10 @@ Pass ``--compress``/``-c`` to re-encode the final clip with
 The result is ``videos/<name>/<name>.<ext>`` for the video and GPX, plus
 ``videos/<name>/<name>.sbatch`` -- a job generated with :mod:`src.sbatch`,
 the same machinery ``make_sbatch.py`` uses -- ready to ``sbatch`` on a
-cluster. ``videos/`` is gitignored: these are imported source clips, not
-something to track in the repo.
+cluster. That job writes its trajectory to
+``videos/<name>/results/<timestamp>/``, alongside the source clip rather than
+the shared ``./output`` directory. ``videos/`` is gitignored: these are
+imported source clips, not something to track in the repo.
 
 All intermediate files (the unzipped clip, the cut, the compressed output)
 are written under ``/tmp`` and removed once the import succeeds; they are
@@ -45,11 +47,12 @@ import numpy as np
 
 from make_sbatch import _guess_venv
 from src.gpx import read_gpx
-from src.sbatch import CLUSTERS, DEFAULT_CLUSTER, JobSpec, build_command, write
+from src.sbatch import (CLUSTERS, DEFAULT_CLUSTER, JobSpec, build_command,
+                         default_output_dir, now_stamp, write)
 
 REPO_ROOT = Path(__file__).resolve().parent
 VIDEOS_DIR = REPO_ROOT / "videos"
-DEFAULT_CALIBRATION = REPO_ROOT / "calibration" / "gopro_SW.txt"
+DEFAULT_CALIBRATION = REPO_ROOT / "calibration" / "gopro_L.txt"
 
 #: How far apart the video and GPX durations may be before the import is refused.
 DURATION_TOLERANCE_S = 3.0
@@ -189,6 +192,7 @@ def _compress(video_path: Path, tmp_dir: Path, ffmpeg: str) -> Path:
 
 def _write_sbatch(args: argparse.Namespace, name: str, video_path: Path,
                   calibration: Path, dest_dir: Path) -> Path:
+    stamp = now_stamp()
     spec = JobSpec(
         name=name,
         email=args.email,
@@ -200,11 +204,11 @@ def _write_sbatch(args: argparse.Namespace, name: str, video_path: Path,
             config=None,
             calibration=calibration,
             camera_height=args.height,
-            output=None,
+            output=default_output_dir(video_path, VIDEOS_DIR, stamp),
             depth_model=None,
         ),
     )
-    return write(spec, dest_dir / f"{name}.sbatch")
+    return write(spec, dest_dir / f"{name}.sbatch", stamp=stamp)
 
 
 def parse_args() -> argparse.Namespace:

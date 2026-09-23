@@ -2,7 +2,8 @@
 
 import pytest
 
-from src.sbatch import CLUSTERS, JobSpec, build_command, render, write
+from src.sbatch import (CLUSTERS, JobSpec, build_command, default_output_dir,
+                         render, write)
 
 
 def _spec(**overrides):
@@ -54,3 +55,32 @@ def test_build_command_always_sets_work_dir():
                             camera_height=1.8, output=None, depth_model=None)
     assert '--work-dir "$WORK_DIR"' in command
     assert "--camera-height 1.8" in command
+
+
+def test_build_command_always_raises_dpvo_buffer_size():
+    command = build_command(video="a.mp4", config=None, calibration="c.txt",
+                            camera_height=1.8, output=None, depth_model=None)
+    assert "--dpvo-opts BUFFER_SIZE 16384" in command
+
+
+def test_default_output_dir_keeps_results_beside_the_video(tmp_path):
+    videos_root = tmp_path / "videos"
+    video = videos_root / "GH010050" / "GH010050.MP4"
+    output = default_output_dir(video, videos_root, "2026-09-23_13-53-43")
+    assert output == videos_root / "GH010050" / "results" / "2026-09-23_13-53-43"
+
+
+def test_default_output_dir_is_none_outside_videos_root(tmp_path):
+    videos_root = tmp_path / "videos"
+    video = tmp_path / "elsewhere" / "clip.mp4"
+    assert default_output_dir(video, videos_root, "2026-09-23_13-53-43") is None
+
+
+def test_default_output_dir_is_none_without_a_video(tmp_path):
+    assert default_output_dir(None, tmp_path / "videos", "2026-09-23_13-53-43") is None
+
+
+def test_write_uses_the_given_stamp_for_the_log_file(tmp_path):
+    destination = tmp_path / "walk.sbatch"
+    written = write(_spec(), destination, stamp="2026-09-23_13-53-43")
+    assert "walk_2026-09-23_13-53-43" in written.read_text()

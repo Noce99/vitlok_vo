@@ -32,3 +32,6 @@ videos/
 !example_360.yaml
 
 sbatches
+
+
+*.zip
