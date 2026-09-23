@@ -43,7 +43,7 @@ DEFAULT_CLUSTER = "arrhenius"
 
 #: Shared between the log filename and the default output directory, so both
 #: name a job by the same moment even though SLURM has no date pattern of its own.
-STAMP_FORMAT = "%Y-%m-%d_%H-%M-%S"
+STAMP_FORMAT = "%Y_%m_%d_%H_%M_%S"
 
 
 def now_stamp() -> str:
@@ -51,11 +51,10 @@ def now_stamp() -> str:
     return datetime.now().strftime(STAMP_FORMAT)
 
 
-def default_output_dir(video: Optional[Path], videos_root: Path,
-                        stamp: str) -> Optional[Path]:
+def default_output_dir(video: Optional[Path], videos_root: Path) -> Optional[Path]:
     """Where a job's trajectory should land when *video* lives under *videos_root*.
 
-    Keeps results next to the source clip -- ``videos/<name>/results/<stamp>/``
+    Keeps results next to the source clip -- ``videos/<name>/results/``
     -- instead of the shared ``./output`` directory that direct CLI runs default
     to, so a video's outputs stay grouped with its inputs. Returns ``None`` (and
     lets the pipeline fall back to ``./output``) for videos outside *videos_root*.
@@ -67,7 +66,7 @@ def default_output_dir(video: Optional[Path], videos_root: Path,
         video.relative_to(Path(videos_root).resolve())
     except ValueError:
         return None
-    return video.parent / "results" / stamp
+    return video.parent / "results"
 
 
 @dataclass
@@ -179,6 +178,7 @@ def build_command(
     output: Optional[Path],
     depth_model: Optional[str],
     extra: Sequence[str] = (),
+    run_name: Optional[str] = None,
 ) -> str:
     """Assemble the ``video_to_trajectory.py`` invocation for the job body."""
     parts = ["python video_to_trajectory.py"]
@@ -194,6 +194,8 @@ def build_command(
         parts.append(f"--depth-model {depth_model}")
     if output is not None:
         parts.append(f'--out "{output}"')
+    if run_name is not None:
+        parts.append(f'--run-name "{run_name}"')
     parts.append('--work-dir "$WORK_DIR"')
     # DPVO's default patch buffer (4096) is sized for short clips; cluster jobs
     # run long enough videos that it overflows ("buffer size is too small").

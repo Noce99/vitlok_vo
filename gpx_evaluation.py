@@ -23,6 +23,9 @@ Ground truth comes from ``--gpx``, a GPS telemetry ``--csv`` (e.g. a GoPro GPS5
 export -- both cropped to the video's window with ``--start-time``), or a
 pre-computed ``--gt-trajectory`` in local metres.
 
+``video_to_trajectory.py --config`` runs this evaluation by itself, right after
+the trajectory is written, whenever that config names a ground-truth source.
+
 Any flag can instead be supplied via ``--config``, a YAML file such as
 ``example_360.yaml``: it may set ``gpx`` or ``gps_csv`` for the ground-truth
 path, plus any other flag below by its long-flag name. A flag given on the
@@ -57,8 +60,8 @@ from src.trajectory import load_metadata, load_trajectory, path_length
 ESTIMATE_COLOR = (0, 0, 220)
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
 
     trajectory = load_trajectory(args.trajectory)
     metadata = load_metadata(args.trajectory)
@@ -136,7 +139,7 @@ def main() -> int:
 
 # --- argument handling ----------------------------------------------------
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -198,7 +201,7 @@ def parse_args() -> argparse.Namespace:
                         help=f"Points spanned by each RTE sub-segment "
                              f"(default: {RTE_DELTA}).")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.config is not None:
         _apply_config(args, args.config)
 
@@ -243,6 +246,18 @@ _CONFIG_KEYS = {
     "label": "label",
     "rte_delta": "rte_delta",
 }
+
+#: Config keys naming a ground-truth source; ``video_to_trajectory.py`` runs
+#: this evaluation automatically when its ``--config`` sets any of them.
+GROUND_TRUTH_KEYS = ("gpx", "gps_csv", "gt_trajectory")
+
+
+def config_has_ground_truth(config_path: Path) -> bool:
+    """Whether a ``--config`` YAML names a ground-truth source to evaluate against."""
+    loaded = yaml.safe_load(Path(config_path).read_text()) or {}
+    return isinstance(loaded, dict) and any(
+        loaded.get(key) is not None for key in GROUND_TRUTH_KEYS)
+
 
 #: Which of those dests get coerced to Path, matching their argparse type=.
 _CONFIG_PATH_DESTS = {"gpx", "csv", "gt_trajectory", "video", "map", "world", "out"}

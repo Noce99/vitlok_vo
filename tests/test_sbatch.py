@@ -66,18 +66,18 @@ def test_build_command_always_raises_dpvo_buffer_size():
 def test_default_output_dir_keeps_results_beside_the_video(tmp_path):
     videos_root = tmp_path / "videos"
     video = videos_root / "GH010050" / "GH010050.MP4"
-    output = default_output_dir(video, videos_root, "2026-09-23_13-53-43")
-    assert output == videos_root / "GH010050" / "results" / "2026-09-23_13-53-43"
+    output = default_output_dir(video, videos_root)
+    assert output == videos_root / "GH010050" / "results"
 
 
 def test_default_output_dir_is_none_outside_videos_root(tmp_path):
     videos_root = tmp_path / "videos"
     video = tmp_path / "elsewhere" / "clip.mp4"
-    assert default_output_dir(video, videos_root, "2026-09-23_13-53-43") is None
+    assert default_output_dir(video, videos_root) is None
 
 
 def test_default_output_dir_is_none_without_a_video(tmp_path):
-    assert default_output_dir(None, tmp_path / "videos", "2026-09-23_13-53-43") is None
+    assert default_output_dir(None, tmp_path / "videos") is None
 
 
 def test_write_uses_the_given_stamp_for_the_log_file(tmp_path):

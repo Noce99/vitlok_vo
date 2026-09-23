@@ -29,6 +29,14 @@ def test_defaults(video):
     assert cfg.run_dir.name == "clip"
 
 
+def test_run_name_expands_strftime_codes(video):
+    import re
+
+    cfg = _config(video, run_name="%Y_%m_%d_%H_%M_%S")
+    assert re.fullmatch(r"\d{4}(_\d{2}){5}", cfg.run_name)
+    assert cfg.run_dir == cfg.output / cfg.run_name
+
+
 def test_cli_overrides_yaml(tmp_path, video):
     config_file = tmp_path / "run.yaml"
     config_file.write_text(yaml.safe_dump({
@@ -115,3 +123,21 @@ def test_from_cli_missing_calibration_mentions_360_escape_hatch(video):
     args = build_parser().parse_args([str(video)])
     with pytest.raises(ValueError, match="--360-camera-model"):
         RunConfig.from_args(args)
+
+
+@pytest.mark.parametrize("key", ["gpx", "gps_csv", "gt_trajectory"])
+def test_config_with_ground_truth_triggers_evaluation(tmp_path, key):
+    """video_to_trajectory.py evaluates by itself when its config names ground truth."""
+    from gpx_evaluation import config_has_ground_truth
+
+    path = tmp_path / "run.yaml"
+    path.write_text(yaml.safe_dump({"video": "clip.mp4", key: "truth.file"}))
+    assert config_has_ground_truth(path)
+
+
+def test_config_without_ground_truth_skips_evaluation(tmp_path):
+    from gpx_evaluation import config_has_ground_truth
+
+    path = tmp_path / "run.yaml"
+    path.write_text(yaml.safe_dump({"video": "clip.mp4", "gpx": None}))
+    assert not config_has_ground_truth(path)

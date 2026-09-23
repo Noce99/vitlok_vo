@@ -223,6 +223,12 @@ format. And any flag, including `--gpx`/`--csv`, can be pulled from a
 python gpx_evaluation.py output/walk/trajectory.txt --config run.yaml
 ```
 
+If the config given to `video_to_trajectory.py --config` already names a
+ground-truth source (`gpx`, `gps_csv` or `gt_trajectory`), this step runs by
+itself as soon as the trajectory is written. The files land in the same
+`evaluation/` folder. If the evaluation fails, the trajectory is still saved and
+the run still succeeds, and the command above redoes it.
+
 For simulator ground truth in a file rather than a GPX:
 
 ```bash

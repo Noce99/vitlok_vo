@@ -70,7 +70,9 @@ def main() -> int:
     venv = args.venv or _guess_venv()
 
     stamp = now_stamp()
-    output = args.out or default_output_dir(video, VIDEOS_DIR, stamp)
+    output = args.out or default_output_dir(video, VIDEOS_DIR)
+    # Results beside the clip go in a folder named like the job's log file.
+    run_name = stamp if output is not None and args.out is None else None
 
     spec = JobSpec(
         name=name,
@@ -91,6 +93,7 @@ def main() -> int:
             output=output,
             depth_model=args.depth_model,
             extra=args.extra or (),
+            run_name=run_name,
         ),
     )
 

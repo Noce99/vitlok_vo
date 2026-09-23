@@ -15,12 +15,19 @@ Pass ``--compress``/``-c`` to re-encode the final clip with
 ``libx264``/``aac`` (``crf 23``, ``preset medium``) before it lands in
 ``videos/<name>/``, trading CPU time for disk space.
 
-The result is ``videos/<name>/<name>.<ext>`` for the video and GPX, plus
-``videos/<name>/<name>.sbatch`` -- a job generated with :mod:`src.sbatch`,
-the same machinery ``make_sbatch.py`` uses -- ready to ``sbatch`` on a
-cluster. That job writes its trajectory to
-``videos/<name>/results/<timestamp>/``, alongside the source clip rather than
-the shared ``./output`` directory. ``videos/`` is gitignored: these are
+The result is ``videos/<name>/<name>.<ext>`` for the video and GPX, plus:
+
+* ``videos/<name>/<name>.yaml`` -- a run config (video, calibration, camera
+  height, output dir, GPX) that can be launched directly with
+  ``python video_to_trajectory.py --config videos/<name>/<name>.yaml`` and
+  shared with ``gpx_evaluation.py --config``;
+* ``videos/<name>/<name>.sbatch`` -- a job generated with :mod:`src.sbatch`,
+  the same machinery ``make_sbatch.py`` uses, ready to ``sbatch`` on a
+  cluster. It runs that same config, overriding only the output to
+  ``videos/<name>/results/<timestamp>/``.
+
+Either way results land alongside the source clip rather than in the shared
+``./output`` directory. ``videos/`` is gitignored: these are
 imported source clips, not something to track in the repo.
 
 All intermediate files (the unzipped clip, the cut, the compressed output)
@@ -34,6 +41,7 @@ Licensed under the GNU General Public License v3.0 -- see LICENSE.
 from __future__ import annotations
 
 import argparse
+import json
 import shlex
 import shutil
 import subprocess
@@ -47,8 +55,8 @@ import numpy as np
 
 from make_sbatch import _guess_venv
 from src.gpx import read_gpx
-from src.sbatch import (CLUSTERS, DEFAULT_CLUSTER, JobSpec, build_command,
-                         default_output_dir, now_stamp, write)
+from src.sbatch import (CLUSTERS, DEFAULT_CLUSTER, STAMP_FORMAT, JobSpec,
+                         build_command, default_output_dir, now_stamp, write)
 
 REPO_ROOT = Path(__file__).resolve().parent
 VIDEOS_DIR = REPO_ROOT / "videos"
@@ -104,9 +112,12 @@ def main() -> int:
         sys.exit(f"[error] {exc}\n[error] import failed; intermediates kept in {tmp_dir}")
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    sbatch_path = _write_sbatch(args, name, final_video, calibration, dest_dir)
+    config_path = _write_config(args, name, final_video, final_gpx, calibration, dest_dir)
+    print(f"[written] {config_path}")
+    sbatch_path = _write_sbatch(args, name, final_video, config_path, dest_dir)
     print(f"[written] {sbatch_path}")
-    print(f"\nsubmit with:  sbatch {sbatch_path}")
+    print(f"\nrun locally with:  python video_to_trajectory.py --config {config_path}")
+    print(f"submit with:       sbatch {sbatch_path}")
     return 0
 
 
@@ -190,8 +201,41 @@ def _compress(video_path: Path, tmp_dir: Path, ffmpeg: str) -> Path:
     return output_path
 
 
+def _write_config(args: argparse.Namespace, name: str, video_path: Path,
+                  gpx_path: Path, calibration: Path, dest_dir: Path) -> Path:
+    """Write a ``--config`` YAML describing this clip's run.
+
+    Strings are written as JSON literals, which are valid YAML and safely
+    quote any path.
+    """
+    config_path = dest_dir / f"{name}.yaml"
+    config_path.write_text(
+        f"# {name} -- imported by import_zip.py from {args.zip_path.name}\n"
+        f"#\n"
+        f"#   python video_to_trajectory.py --config {config_path}\n"
+        f"#   python gpx_evaluation.py {dest_dir / 'results' / '<timestamp>' / 'trajectory.txt'} "
+        f"--config {config_path}\n"
+        f"\n"
+        f"# --- inputs -----------------------------------------------------------------\n"
+        f"video: {json.dumps(str(video_path))}\n"
+        f"calibration: {json.dumps(str(calibration))}\n"
+        f"\n"
+        f"# The pipeline's only metric reference -- an error here scales the whole\n"
+        f"# trajectory (see CLAUDE.md).\n"
+        f"camera_height: {args.height}\n"
+        f"\n"
+        f"# --- outputs ----------------------------------------------------------------\n"
+        f"output: {json.dumps(str(dest_dir / 'results'))}\n"
+        f"run_name: {json.dumps(STAMP_FORMAT)}   # results/YYYY_MM_DD_hh_mm_ss/, one per run\n"
+        f"\n"
+        f"# --- evaluation (read by gpx_evaluation.py, ignored by video_to_trajectory.py)\n"
+        f"gpx: {json.dumps(str(gpx_path))}\n"
+    )
+    return config_path
+
+
 def _write_sbatch(args: argparse.Namespace, name: str, video_path: Path,
-                  calibration: Path, dest_dir: Path) -> Path:
+                  config_path: Path, dest_dir: Path) -> Path:
     stamp = now_stamp()
     spec = JobSpec(
         name=name,
@@ -200,12 +244,13 @@ def _write_sbatch(args: argparse.Namespace, name: str, video_path: Path,
         repo_root=REPO_ROOT,
         venv=_guess_venv(),
         command=build_command(
-            video=video_path,
-            config=None,
-            calibration=calibration,
-            camera_height=args.height,
-            output=default_output_dir(video_path, VIDEOS_DIR, stamp),
+            video=None,
+            config=config_path,
+            calibration=None,
+            camera_height=None,
+            output=default_output_dir(video_path, VIDEOS_DIR),
             depth_model=None,
+            run_name=stamp,
         ),
     )
     return write(spec, dest_dir / f"{name}.sbatch", stamp=stamp)
@@ -226,7 +271,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-c", "--compress", action="store_true",
                         help="Re-encode the final clip (libx264/aac) before copying it in.")
     parser.add_argument("--calibration", type=Path, default=DEFAULT_CALIBRATION,
-                        help="Calibration file for the generated sbatch job.")
+                        help="Calibration file for the generated config and sbatch job.")
     parser.add_argument("--email", default=_default_email(),
                         help="Address for SLURM notifications in the generated sbatch job.")
     parser.add_argument("--cluster", choices=tuple(CLUSTERS), default=DEFAULT_CLUSTER,

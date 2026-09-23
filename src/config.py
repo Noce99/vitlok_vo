@@ -19,6 +19,7 @@ a run is described by its video plus the handful of parameters below.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Optional
@@ -81,7 +82,12 @@ class RunConfig:
 
     # --- outputs ----------------------------------------------------------
     output: Path = REPO_ROOT / "output"
-    """Directory that will hold ``<video stem>/trajectory.txt`` and its metadata."""
+    """Directory that will hold ``<run name>/trajectory.txt`` and its metadata."""
+
+    run_name: Optional[str] = None
+    """Name of the run folder inside ``output``. ``None`` uses the video stem.
+    ``strftime`` codes are expanded once, when the run starts, so
+    ``"%Y_%m_%d_%H_%M_%S"`` gives every run its own timestamped folder."""
 
     work_dir: Optional[Path] = None
     """Where the large intermediates go. ``None`` selects a fresh directory under
@@ -179,6 +185,8 @@ class RunConfig:
             value = getattr(self, name)
             if value is not None:
                 setattr(self, name, Path(value).expanduser().resolve())
+        self.run_name = (datetime.now().strftime(self.run_name)
+                         if self.run_name else self.video.stem)
         self.validate()
 
     # -- validation --------------------------------------------------------
@@ -266,11 +274,6 @@ class RunConfig:
             raise FileNotFoundError(f"DPVO config missing: {self.dpvo_config}")
 
     # -- derived -----------------------------------------------------------
-    @property
-    def run_name(self) -> str:
-        """Stem of the source video; names the output folder."""
-        return self.video.stem
-
     @property
     def run_dir(self) -> Path:
         """``<output>/<run name>/`` -- where the trajectory is written."""
@@ -366,6 +369,9 @@ def build_parser() -> argparse.ArgumentParser:
     g = p.add_argument_group("outputs")
     g.add_argument("--out", "--output", dest="output", default=None,
                    help="Output directory (default: ./output).")
+    g.add_argument("--run-name", dest="run_name", default=None,
+                   help="Run folder inside --out; strftime codes are expanded, "
+                        "e.g. '%%Y_%%m_%%d_%%H_%%M_%%S' (default: the video stem).")
     g.add_argument("--work-dir", dest="work_dir", default=None,
                    help="Directory for large intermediates "
                         "(default: a fresh folder under $TMPDIR or /tmp).")

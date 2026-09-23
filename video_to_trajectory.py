@@ -15,9 +15,11 @@ Four stages run back to back, each implemented in ``src/``:
 4. :mod:`src.dpvo_runner` -- track with DPVO and apply the depth-derived scale.
 
 The result is ``output/<video stem>/trajectory.txt``; evaluate it against a GPS
-track with ``gpx_evaluation.py``. The large intermediates live in a scratch
-directory that is removed on the way out -- pass ``--keep-intermediates`` to
-retain them.
+track with ``gpx_evaluation.py``. If ``--config`` names a ground-truth source
+(``gpx``, ``gps_csv`` or ``gt_trajectory``), that evaluation runs automatically
+once the trajectory is written, into ``output/<video stem>/evaluation/``. The
+large intermediates live in a scratch directory that is removed on the way out
+-- pass ``--keep-intermediates`` to retain them.
 
 This file is deliberately thin: it wires the stages together and times them, and
 nothing else.
@@ -30,8 +32,11 @@ from __future__ import annotations
 
 import sys
 import time
+import traceback
+from pathlib import Path
 
-from src.config import RunConfig
+import gpx_evaluation
+from src.config import RunConfig, build_parser
 from src.depth import compute_depth
 from src.dpvo_runner import run_dpvo
 from src.ground_scale_shift import fit_ground_scale_shift
@@ -42,7 +47,8 @@ from src.workdir import WorkDir
 
 
 def main() -> int:
-    cfg = RunConfig.from_cli()
+    args = build_parser().parse_args()
+    cfg = RunConfig.from_args(args)
     # Fail now rather than after an hour of depth inference.
     cfg.check_runtime_requirements()
     timings: dict[str, float] = {}
@@ -60,7 +66,7 @@ def main() -> int:
         with _stage("dpvo", timings):
             result = run_dpvo(cfg, video, depth_maps, corrections)
 
-    save_trajectory(result, cfg, extra={
+    trajectory_path = save_trajectory(result, cfg, extra={
         "stage_seconds": timings,
         "video": {
             "fps": video.fps,
@@ -71,8 +77,33 @@ def main() -> int:
         "depth": {"model": depth_maps.model, "n_frames": depth_maps.n_frames},
         "ground_scale_shift": corrections.summary(),
     })
+
+    if args.config is not None and gpx_evaluation.config_has_ground_truth(Path(args.config)):
+        with _stage("evaluation", timings):
+            _evaluate(trajectory_path, Path(args.config))
+
     print(f"[done] {sum(timings.values()) / 60:.1f} min total")
     return 0
+
+
+def _evaluate(trajectory_path: Path, config_path: Path) -> None:
+    """Run ``gpx_evaluation.py`` on the fresh trajectory with the same config.
+
+    The trajectory is already on disk by now, so a failed evaluation is
+    reported rather than raised: it must not look like the run itself failed,
+    and it can always be redone by hand.
+    """
+    argv = [str(trajectory_path), "--config", str(config_path)]
+    try:
+        status = gpx_evaluation.main(argv)
+    except SystemExit as exc:
+        status = exc.code if isinstance(exc.code, int) else 1
+    except Exception:
+        traceback.print_exc()
+        status = 1
+    if status:
+        print(f"[eval] evaluation failed; the trajectory is saved, retry with:\n"
+              f"       python gpx_evaluation.py {' '.join(argv)}", file=sys.stderr)
 
 
 class _stage:
