@@ -3,6 +3,12 @@
 
     python import_zip.py GH010050.zip -h 1.8
     python import_zip.py GH010050.zip -h 1.8 --compress
+    python import_zip.py -h 1.8        # everything in zips_inbox/
+
+With no zip given, every ``*.zip`` in ``zips_inbox/`` (gitignored) is imported
+in turn, and each one is deleted from the inbox once its import succeeds; a
+zip whose import fails is left there. If there is no zip argument and no inbox
+either, the script reports it and does nothing.
 
 The zip must contain exactly one video and one ``.gpx`` file, and may also
 contain a ``.txt`` file whose *last line* is an ffmpeg command that cuts the
@@ -10,6 +16,14 @@ video down to the section the GPX covers (as exported by some GoPro tools).
 When that file is present, its command is run first; either way, the final
 clip's duration is checked against the GPX track's time span before anything
 is copied.
+
+A zip may instead hold *several* clips cut from one video (as in
+``GH010050-clips.zip``): one video, plus a ``...clip-<N>.gpx`` and a
+``clip-<N>-...txt`` cut-instructions file per clip, paired by ``<N>``. Each
+clip is imported separately as ``videos/<base>_0/``, ``videos/<base>_1/``, ...
+in clip order, where ``<base>`` is the zip's name without its ``-clips``
+suffix. Every clip is cut and checked before any of them is copied in, so a
+bad clip fails the whole zip.
 
 Pass ``--compress``/``-c`` to re-encode the final clip with
 ``libx264``/``aac`` (``crf 23``, ``preset medium``) before it lands in
@@ -42,12 +56,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -60,6 +76,7 @@ from src.sbatch import (CLUSTERS, DEFAULT_CLUSTER, STAMP_FORMAT, JobSpec,
 
 REPO_ROOT = Path(__file__).resolve().parent
 VIDEOS_DIR = REPO_ROOT / "videos"
+INBOX_DIR = REPO_ROOT / "zips_inbox"
 DEFAULT_CALIBRATION = REPO_ROOT / "calibration" / "gopro_L.txt"
 
 #: How far apart the video and GPX durations may be before the import is refused.
@@ -71,78 +88,192 @@ COMPRESS_ARGS = [
 ]
 
 
-def main() -> int:
-    args = parse_args()
+#: Picks the clip number out of multi-clip member names such as
+#: ``GH010050-clips-clip-2.gpx`` and ``clip-2-ffmpeg-cut-instructions.txt``.
+CLIP_NUMBER_RE = re.compile(r"clip-(\d+)")
 
-    zip_path = args.zip_path.expanduser().resolve()
-    if not zip_path.is_file():
-        sys.exit(f"[error] not a file: {zip_path}")
+MULTI_CLIP_SUFFIX = "-clips"
+
+
+class ImportFailed(Exception):
+    """One zip could not be imported; the message says why."""
+
+
+@dataclass(frozen=True)
+class ClipPlan:
+    """One clip to import: its destination name and its members in the zip."""
+    name: str
+    gpx: str
+    txt: Optional[str]
+
+
+def main() -> int:
+    parser, args = parse_args()
+
+    from_inbox = not args.zip_paths
+    if from_inbox:
+        if not INBOX_DIR.is_dir():
+            print(f"[nothing to do] no zip given and no inbox folder at {INBOX_DIR}")
+            return 0
+        zip_paths = sorted(INBOX_DIR.glob("*.zip"))
+        if not zip_paths:
+            print(f"[nothing to do] no zip given and {INBOX_DIR} contains no .zip files")
+            return 0
+        print(f"[inbox] {len(zip_paths)} zip(s) found in {INBOX_DIR}")
+    else:
+        zip_paths = args.zip_paths
+
+    if args.height is None:
+        parser.error("the following arguments are required: -h/--height")
 
     calibration = args.calibration.expanduser().resolve()
     if not calibration.is_file():
         sys.exit(f"[error] calibration file not found: {calibration}")
-
-    name = zip_path.stem
-    dest_dir = VIDEOS_DIR / name
-    if dest_dir.exists():
-        sys.exit(f"[error] {dest_dir} already exists")
 
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
     if ffmpeg is None or ffprobe is None:
         sys.exit("[error] ffmpeg/ffprobe not found on PATH")
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix=f"import_zip_{name}_", dir="/tmp"))
-    try:
-        video_path, gpx_path, txt_path = _extract(zip_path, tmp_dir)
-        if txt_path is not None:
-            video_path = _run_cut_instructions(txt_path, tmp_dir, ffmpeg)
-        _check_durations(video_path, gpx_path, ffprobe)
-        if args.compress:
-            video_path = _compress(video_path, tmp_dir, ffmpeg)
+    failed = []
+    for zip_path in zip_paths:
+        zip_path = zip_path.expanduser().resolve()
+        if len(zip_paths) > 1:
+            print(f"\n=== {zip_path.name} ===")
+        try:
+            import_zip(zip_path, args, calibration, ffmpeg, ffprobe)
+        except ImportFailed as exc:
+            print(f"[error] {zip_path.name}: {exc}", file=sys.stderr)
+            failed.append(zip_path)
+            continue
+        if from_inbox:
+            zip_path.unlink()
+            print(f"[deleted] {zip_path}")
 
-        dest_dir.mkdir(parents=True)
-        final_video = dest_dir / f"{name}{video_path.suffix}"
-        final_gpx = dest_dir / f"{name}{gpx_path.suffix}"
-        shutil.copy2(video_path, final_video)
-        shutil.copy2(gpx_path, final_gpx)
-        print(f"[copied] {final_video}")
-        print(f"[copied] {final_gpx}")
-    except Exception as exc:
-        sys.exit(f"[error] {exc}\n[error] import failed; intermediates kept in {tmp_dir}")
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    config_path = _write_config(args, name, final_video, final_gpx, calibration, dest_dir)
-    print(f"[written] {config_path}")
-    sbatch_path = _write_sbatch(args, name, final_video, config_path, dest_dir)
-    print(f"[written] {sbatch_path}")
-    print(f"\nrun locally with:  python video_to_trajectory.py --config {config_path}")
-    print(f"submit with:       sbatch {sbatch_path}")
+    if len(zip_paths) > 1:
+        print(f"\n[summary] {len(zip_paths) - len(failed)}/{len(zip_paths)} imported")
+    if failed:
+        where = " (left in the inbox)" if from_inbox else ""
+        print(f"[summary] failed{where}: " + ", ".join(p.name for p in failed),
+              file=sys.stderr)
+        return 1
     return 0
 
 
-def _extract(zip_path: Path, tmp_dir: Path) -> tuple[Path, Path, Optional[Path]]:
-    """Unzip the video, GPX and (optional) cut-instructions file into *tmp_dir*."""
+def import_zip(zip_path: Path, args: argparse.Namespace, calibration: Path,
+               ffmpeg: str, ffprobe: str) -> None:
+    """Import one zip into ``videos/<name>/`` (or one folder per clip);
+    raise :class:`ImportFailed` on failure."""
+    if not zip_path.is_file():
+        raise ImportFailed(f"not a file: {zip_path}")
+
+    try:
+        video_member, clips = _plan(zip_path)
+    except ValueError as exc:
+        raise ImportFailed(str(exc)) from exc
+    for clip in clips:
+        if (VIDEOS_DIR / clip.name).exists():
+            raise ImportFailed(f"{VIDEOS_DIR / clip.name} already exists")
+    if len(clips) > 1:
+        print(f"[clips] {len(clips)} clips -> " + ", ".join(c.name for c in clips))
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"import_zip_{zip_path.stem}_", dir="/tmp"))
+    try:
+        _extract(zip_path, tmp_dir, [video_member]
+                 + [m for c in clips for m in (c.gpx, c.txt) if m is not None])
+        prepared = []
+        for clip in clips:
+            if len(clips) > 1:
+                print(f"--- {clip.name} ---")
+            video_path = tmp_dir / video_member
+            gpx_path = tmp_dir / clip.gpx
+            if clip.txt is not None:
+                video_path = _run_cut_instructions(tmp_dir / clip.txt, tmp_dir, ffmpeg)
+            _check_durations(video_path, gpx_path, ffprobe)
+            if args.compress:
+                video_path = _compress(video_path, tmp_dir, ffmpeg)
+            prepared.append((clip.name, video_path, gpx_path))
+
+        imported = []
+        for name, video_path, gpx_path in prepared:
+            dest_dir = VIDEOS_DIR / name
+            dest_dir.mkdir(parents=True)
+            final_video = dest_dir / f"{name}{video_path.suffix}"
+            final_gpx = dest_dir / f"{name}{gpx_path.suffix}"
+            shutil.copy2(video_path, final_video)
+            shutil.copy2(gpx_path, final_gpx)
+            print(f"[copied] {final_video}")
+            print(f"[copied] {final_gpx}")
+            imported.append((name, final_video, final_gpx, dest_dir))
+    except Exception as exc:
+        raise ImportFailed(f"{exc}\n[error] import failed; intermediates kept in {tmp_dir}") from exc
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    for name, final_video, final_gpx, dest_dir in imported:
+        config_path = _write_config(args, zip_path, name, final_video, final_gpx,
+                                    calibration, dest_dir)
+        print(f"[written] {config_path}")
+        sbatch_path = _write_sbatch(args, name, final_video, config_path, dest_dir)
+        print(f"[written] {sbatch_path}")
+        print(f"\nrun locally with:  python video_to_trajectory.py --config {config_path}")
+        print(f"submit with:       sbatch {sbatch_path}")
+
+
+def _plan(zip_path: Path) -> tuple[str, list[ClipPlan]]:
+    """Read the zip's listing and decide which clip(s) it holds, without extracting.
+
+    Returns the video member and one :class:`ClipPlan` per clip: a single clip
+    named after the zip, or -- when there are several GPX files -- one per
+    ``clip-<N>`` pair, named ``<base>_0``, ``<base>_1``, ... in order of ``N``.
+    """
     with zipfile.ZipFile(zip_path) as zf:
         names = [n for n in zf.namelist() if not n.endswith("/")]
-        for n in names:
-            if n.startswith("/") or ".." in Path(n).parts:
-                raise ValueError(f"unsafe path in zip: {n}")
+    for n in names:
+        if n.startswith("/") or ".." in Path(n).parts:
+            raise ValueError(f"unsafe path in zip: {n}")
 
-        videos = [n for n in names if Path(n).suffix.lower() in (".mp4", ".mov")]
-        gpxs = [n for n in names if Path(n).suffix.lower() == ".gpx"]
-        txts = [n for n in names if Path(n).suffix.lower() == ".txt"]
-        if len(videos) != 1:
-            raise ValueError(f"expected exactly one video in the zip, found {len(videos)}")
-        if len(gpxs) != 1:
-            raise ValueError(f"expected exactly one .gpx in the zip, found {len(gpxs)}")
+    videos = [n for n in names if Path(n).suffix.lower() in (".mp4", ".mov")]
+    gpxs = [n for n in names if Path(n).suffix.lower() == ".gpx"]
+    txts = [n for n in names if Path(n).suffix.lower() == ".txt"]
+    if len(videos) != 1:
+        raise ValueError(f"expected exactly one video in the zip, found {len(videos)}")
+    if not gpxs:
+        raise ValueError("expected at least one .gpx in the zip, found 0")
+
+    if len(gpxs) == 1:
         if len(txts) > 1:
             raise ValueError(f"expected at most one .txt in the zip, found {len(txts)}")
+        return videos[0], [ClipPlan(zip_path.stem, gpxs[0], txts[0] if txts else None)]
 
-        zf.extractall(tmp_dir, members=videos + gpxs + txts)
+    gpx_by_clip = _by_clip_number(gpxs, "GPX")
+    txt_by_clip = _by_clip_number(txts, "cut-instructions")
+    if set(gpx_by_clip) != set(txt_by_clip):
+        raise ValueError(
+            f"clip GPX files {sorted(gpx_by_clip)} and cut-instructions files "
+            f"{sorted(txt_by_clip)} do not pair up by clip number"
+        )
+    base = zip_path.stem.removesuffix(MULTI_CLIP_SUFFIX)
+    clips = [ClipPlan(f"{base}_{i}", gpx_by_clip[number], txt_by_clip[number])
+             for i, number in enumerate(sorted(gpx_by_clip))]
+    return videos[0], clips
 
-    txt_path = tmp_dir / txts[0] if txts else None
-    return tmp_dir / videos[0], tmp_dir / gpxs[0], txt_path
+
+def _by_clip_number(members: list[str], kind: str) -> dict[int, str]:
+    by_number: dict[int, str] = {}
+    for member in members:
+        match = CLIP_NUMBER_RE.search(Path(member).name)
+        if match is None:
+            raise ValueError(f"multi-clip zip: {kind} file {member} has no clip-<N> in its name")
+        number = int(match.group(1))
+        if number in by_number:
+            raise ValueError(f"multi-clip zip: two {kind} files for clip {number}")
+        by_number[number] = member
+    return by_number
+
+
+def _extract(zip_path: Path, tmp_dir: Path, members: list[str]) -> None:
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(tmp_dir, members=members)
 
 
 def _run_cut_instructions(txt_path: Path, tmp_dir: Path, ffmpeg: str) -> Path:
@@ -201,7 +332,7 @@ def _compress(video_path: Path, tmp_dir: Path, ffmpeg: str) -> Path:
     return output_path
 
 
-def _write_config(args: argparse.Namespace, name: str, video_path: Path,
+def _write_config(args: argparse.Namespace, zip_path: Path, name: str, video_path: Path,
                   gpx_path: Path, calibration: Path, dest_dir: Path) -> Path:
     """Write a ``--config`` YAML describing this clip's run.
 
@@ -210,7 +341,7 @@ def _write_config(args: argparse.Namespace, name: str, video_path: Path,
     """
     config_path = dest_dir / f"{name}.yaml"
     config_path.write_text(
-        f"# {name} -- imported by import_zip.py from {args.zip_path.name}\n"
+        f"# {name} -- imported by import_zip.py from {zip_path.name}\n"
         f"#\n"
         f"#   python video_to_trajectory.py --config {config_path}\n"
         f"#   python gpx_evaluation.py {dest_dir / 'results' / '<timestamp>' / 'trajectory.txt'} "
@@ -256,7 +387,7 @@ def _write_sbatch(args: argparse.Namespace, name: str, video_path: Path,
     return write(spec, dest_dir / f"{name}.sbatch", stamp=stamp)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
         add_help=False,
@@ -264,10 +395,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--help", action="help", default=argparse.SUPPRESS,
                         help="show this help message and exit")
-    parser.add_argument("zip_path", type=Path,
-                        help="Exported zip (video + GPX, optionally + cut instructions).")
-    parser.add_argument("-h", "--height", type=float, required=True,
-                        help="Camera height above ground, in metres.")
+    parser.add_argument("zip_paths", type=Path, nargs="*",
+                        help="Exported zip(s) (video + GPX, optionally + cut instructions). "
+                             f"If omitted, every zip in {INBOX_DIR.name}/ is imported and "
+                             "deleted once imported.")
+    parser.add_argument("-h", "--height", type=float,
+                        help="Camera height above ground, in metres (required when there "
+                             "is something to import).")
     parser.add_argument("-c", "--compress", action="store_true",
                         help="Re-encode the final clip (libx264/aac) before copying it in.")
     parser.add_argument("--calibration", type=Path, default=DEFAULT_CALIBRATION,
@@ -279,7 +413,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if not args.email:
         parser.error("--email is required (no git user.email configured either)")
-    return args
+    return parser, args
 
 
 def _default_email() -> Optional[str]:

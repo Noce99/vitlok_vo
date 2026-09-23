@@ -23,8 +23,9 @@ output/
 cloth_nodes.txt
 .pytest_cache/
 
-# clips imported by import_zip.py
+# clips imported by import_zip.py, and its inbox of zips waiting to be imported
 videos/
+zips_inbox/
 
 # Configurations file, but example.yaml
 *.yaml
