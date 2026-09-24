@@ -28,6 +28,10 @@ class PatchGraph:
         self.patches_ = torch.zeros(self.N, self.M, 3, self.P, self.P, dtype=torch.float, device="cuda") # 4096, 96, 3, 3, 3
         self.intrinsics_ = torch.zeros(self.N, 4, dtype=torch.float, device="cuda")                      # 4096, 4
 
+        # each patch's inverse depth as first set from metric depth at creation,
+        # kept fixed afterwards as the target the soft depth prior pulls BA towards
+        self.prior_invdepth_ = torch.zeros(self.N, self.M, dtype=torch.float, device="cuda")             # 4096, 96
+
         self.points_ = torch.zeros(self.N * self.M, 3, dtype=torch.float, device="cuda")                 # 393216, 3
         self.colors_ = torch.zeros(self.N, self.M, 3, dtype=torch.uint8, device="cuda")                  # 4096, 96, 3
 
@@ -85,6 +89,7 @@ class PatchGraph:
         """ normalize depth and poses """
         s = self.patches_[:self.n,:,2].mean()
         self.patches_[:self.n,:,2] /= s
+        self.prior_invdepth_[:self.n] /= s
         self.poses_[:self.n,:3] *= s
         for t, (t0, dP) in self.delta.items():
             self.delta[t] = (t0, dP.scale(s))

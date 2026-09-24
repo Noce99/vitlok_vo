@@ -305,13 +305,12 @@ slides the rest of the series out of step with the video.
 
 ### 4 · DPVO (`src/dpvo_runner.py`)
 
-Depth reaches DPVO twice. Inside the tracker, the vendored patch uses it to place
-patches on nearby well-conditioned surfaces and to initialise their inverse
-depths. Afterwards, `--scaling depth_ratio` (the default) compares metric depth
-at each keyframe's patch centres against the inverse depth DPVO converged on; the
-ratio is DPVO's scale error there, and applying it to the incremental
-displacements before re-integrating corrects scale *drift*, not just a single
-global scale factor. `--scaling none` leaves DPVO's own scale alone.
+Depth reaches DPVO twice. The vendored patch uses it to place patches on nearby
+well-conditioned surfaces and to initialise their inverse depths, and bundle
+adjustment then holds each patch's inverse depth fixed at that value and solves
+for camera poses only. Since depth never drifts from its metric-informed initial
+value, poses come out fully determined relative to it, and no post-hoc rescaling
+of the trajectory is needed.
 
 ---
 

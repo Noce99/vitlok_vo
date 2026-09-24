@@ -18,3 +18,5 @@ MIXED_PRECISION: True
 
 CENTROID_SEL_STRAT: 'DEPTH_HALF_RANDOM' # 'RANDOM' or 'DEPTH_HALF_RANDOM' or 'DEPTH_CLOSE'
 CENTROID_SEL_RANDOM_RATIO: 0.5 # for DEPTH_HALF_RANDOM: fraction of patches picked fully at random (rest biased towards nearby depth)
+
+DEPTH_PRIOR_LAMBDA: 1.0 # soft-pull BA's depth towards the metric prior, weighted equally with each patch's own visual evidence

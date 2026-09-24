@@ -24,7 +24,6 @@ def _config(video, **overrides):
 def test_defaults(video):
     cfg = _config(video)
     assert cfg.depth_model == "metric3d"
-    assert cfg.scaling == "depth_ratio"
     assert cfg.run_name == "clip"
     assert cfg.run_dir.name == "clip"
 
@@ -72,7 +71,6 @@ def test_missing_video_is_an_error(tmp_path):
 
 @pytest.mark.parametrize("field,value", [
     ("depth_model", "banana"),
-    ("scaling", "banana"),
     ("camera_height", -1.0),
     ("resize", 0.0),
     ("resize", 2.0),

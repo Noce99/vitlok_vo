@@ -441,7 +441,8 @@ std::vector<torch::Tensor> cuda_ba(
     torch::Tensor jj,
     torch::Tensor kk,
     const int PPF,
-    const int t0, const int t1, const int iterations, bool eff_impl)
+    const int t0, const int t1, const int iterations, bool eff_impl,
+    torch::Tensor prior_invdepth, double lambda_prior)
 {
 
   auto ktuple = torch::_unique(kk, true, true);
@@ -513,6 +514,20 @@ std::vector<torch::Tensor> cuda_ba(
       u.packed_accessor32<mtype,1,torch::RestrictPtrTraits>(), t0, blockE->ppf);
 
     // std::cout << "Total residuals: " << r_total.item<double>() << std::endl;
+
+    if (lambda_prior > 0) {
+      // Soft-pull each patch's inverse depth back towards its metric-informed
+      // initial value, weighted relative to how much visual evidence (C, the
+      // depth-depth Hessian diagonal) this window has already accumulated for
+      // it -- a patch with strong multi-view support keeps its freedom to
+      // correct a wrong prior; a weakly-observed one leans on the prior.
+      torch::Tensor current_invd = patches.index({kx, 2, P/2, P/2});
+      torch::Tensor prior_gathered = prior_invdepth.index({kx});
+      torch::Tensor prior_strength = lambda_prior * C;
+      C = C + prior_strength;
+      u = u + prior_strength * (prior_gathered - current_invd);
+    }
+
     v = v.view({6*N, 1});
     u = u.view({1*M, 1});
 

@@ -314,9 +314,8 @@ def _label_from(metadata: dict, path: Path) -> str:
     """A readable name for the estimate, from its metadata when possible."""
     config = metadata.get("config", {})
     model = config.get("depth_model")
-    scaling = metadata.get("trajectory", {}).get("scaling")
-    if model and scaling:
-        return f"DPVO + {model} ({scaling})"
+    if model:
+        return f"DPVO + {model}"
     return path.parent.name or path.stem
 
 

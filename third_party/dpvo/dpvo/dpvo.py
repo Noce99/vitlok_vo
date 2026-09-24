@@ -290,6 +290,7 @@ class DPVO:
                 self.pg.colors_[i] = self.pg.colors_[i+1]
                 self.pg.poses_[i] = self.pg.poses_[i+1]
                 self.pg.patches_[i] = self.pg.patches_[i+1]
+                self.pg.prior_invdepth_[i] = self.pg.prior_invdepth_[i+1]
                 self.pg.intrinsics_[i] = self.pg.intrinsics_[i+1]
 
                 self.imap_[i % self.pmem] = self.imap_[(i+1) % self.pmem]
@@ -323,7 +324,8 @@ class DPVO:
         lmbda = torch.as_tensor([1e-4], device="cuda")
         t0 = self.pg.ii.min().item()
         fastba.BA(self.poses, self.patches, self.intrinsics,
-            full_target, full_weight, lmbda, full_ii, full_jj, full_kk, t0, self.n, M=self.M, iterations=2, eff_impl=True)
+            full_target, full_weight, lmbda, full_ii, full_jj, full_kk, t0, self.n, M=self.M, iterations=2, eff_impl=True,
+            prior_invdepth=self.pg.prior_invdepth_.view(-1), lambda_prior=self.cfg.DEPTH_PRIOR_LAMBDA)
         self.ran_global_ba[self.n] = True
 
     def update(self):
@@ -351,8 +353,9 @@ class DPVO:
                 else:
                     t0 = self.n - self.cfg.OPTIMIZATION_WINDOW if self.is_initialized else 1
                     t0 = max(t0, 1)
-                    fastba.BA(self.poses, self.patches, self.intrinsics, 
-                        target, weight, lmbda, self.pg.ii, self.pg.jj, self.pg.kk, t0, self.n, M=self.M, iterations=2, eff_impl=False)
+                    fastba.BA(self.poses, self.patches, self.intrinsics,
+                        target, weight, lmbda, self.pg.ii, self.pg.jj, self.pg.kk, t0, self.n, M=self.M, iterations=2, eff_impl=False,
+                        prior_invdepth=self.pg.prior_invdepth_.view(-1), lambda_prior=self.cfg.DEPTH_PRIOR_LAMBDA)
             except:
                 print("Warning BA failed...")
 
@@ -458,6 +461,7 @@ class DPVO:
             patches[:,:,2] = torch.rand_like(patches[:,:,2,0,0,None,None])
 
         self.pg.patches_[self.n] = patches
+        self.pg.prior_invdepth_[self.n] = patches[0, :, 2, 1, 1]
         # if self.n > 0:
         #     print(self.pg.patches_[None, self.n-1].shape)
         #     print(patches.shape)

@@ -12,6 +12,12 @@ _C.CENTROID_SEL_STRAT = 'RANDOM'
 # selected fully at random (the remainder is biased towards nearby depth, <10m)
 _C.CENTROID_SEL_RANDOM_RATIO = 0.5
 
+# strength of the soft prior pulling BA's patch inverse depths back towards their
+# metric-informed initial value, relative to each patch's own accumulated visual
+# evidence (0: no prior, DPVO's stock free-depth behaviour; 1: prior weighted
+# equally with visual evidence; large: approaches depth held fixed)
+_C.DEPTH_PRIOR_LAMBDA = 0.0
+
 # VO config (increase for better accuracy)
 _C.PATCHES_PER_FRAME = 80
 _C.REMOVAL_WINDOW = 20

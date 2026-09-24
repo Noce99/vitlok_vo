@@ -66,9 +66,6 @@ def save_trajectory(
         "trajectory": {
             "n_poses": int(result.n_poses),
             "n_keyframes": int(result.n_keyframes),
-            "scaling": result.scaling,
-            "mean_scale_ratio": result.mean_ratio,
-            "scale_ratio_std": result.ratio_std,
             "duration_s": float(result.txyz[-1, 0]) if len(result.txyz) else 0.0,
             "path_length_m": path_length(result.txyz),
         },

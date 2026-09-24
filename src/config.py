@@ -39,9 +39,6 @@ PATH_FIELDS = (
 #: Depth backbones understood by ``--depth-model``.
 DEPTH_MODELS = ("metric3d", "depthpro")
 
-#: How the DPVO trajectory is brought to metric scale (``--scaling``).
-SCALING_MODES = ("depth_ratio", "none")
-
 #: --config keys that belong to gpx_evaluation.py's own loader, not RunConfig's.
 #: A YAML file is commonly shared between the two scripts (e.g. example_360.yaml
 #: sets ``gps_csv`` for gpx_evaluation.py's ``--config``); ignored here rather
@@ -165,9 +162,6 @@ class RunConfig:
     """Points further than this are not considered when fitting the ground."""
 
     # --- stage 4: DPVO ----------------------------------------------------
-    scaling: str = "depth_ratio"
-    """How to scale DPVO's output (see :data:`SCALING_MODES`)."""
-
     stride: int = 1
     """Process every N-th frame of the linear video."""
 
@@ -223,10 +217,6 @@ class RunConfig:
         if self.depth_model not in DEPTH_MODELS:
             raise ValueError(
                 f"--depth-model must be one of {DEPTH_MODELS}, got {self.depth_model!r}"
-            )
-        if self.scaling not in SCALING_MODES:
-            raise ValueError(
-                f"--scaling must be one of {SCALING_MODES}, got {self.scaling!r}"
             )
         if self.camera_height <= 0:
             raise ValueError(f"--camera-height must be positive, got {self.camera_height}")
@@ -431,8 +421,6 @@ def build_parser() -> argparse.ArgumentParser:
                         "ground (default: 0.6).")
 
     g = p.add_argument_group("stage 4: DPVO")
-    g.add_argument("--scaling", choices=SCALING_MODES, default=None,
-                   help="How to scale the trajectory (default: depth_ratio).")
     g.add_argument("--stride", type=int, default=None,
                    help="Process every N-th frame (default: 1).")
     g.add_argument("--random-patch-ratio", dest="random_patch_ratio", type=float,
